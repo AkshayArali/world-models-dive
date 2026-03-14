@@ -1,24 +1,33 @@
+# Dependencies
+node_modules
 frontend/node_modules
+backend/node_modules
+
+# Build output
+dist
+build
 frontend/dist
 frontend/build
-frontend/public
-frontend/src
-frontend/vite.config.ts
-frontend/index.html
-frontend/package.json
-frontend/package-lock.json
-frontend/README.md
-frontend/LICENSE
-frontend/README.md
-backend/node_modules
 backend/dist
 backend/build
-backend/public
-backend/src
-backend/vite.config.ts
-backend/index.html
-backend/package.json
-backend/package-lock.json
-backend/README.md
-backend/LICENSE
-backend/README.md
+
+# Environment secrets (keep .env.example)
+.env
+.env.local
+*.env
+
+# Generated / cache
+generated_worlds.json
+.cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea
+.vscode/*
+
+# Logs
+*.log
+npm-debug.log*
