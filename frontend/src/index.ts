@@ -497,24 +497,18 @@ function randomChapter(): string {
   return `Chapter ${Math.floor(Math.random() * 34) + 1}`;
 }
 
-let chapterScrollTimeout: ReturnType<typeof setTimeout> | null = null;
 
-function showChapterScroll(number: string, title: string, description: string) {
-  if (chapterScrollTimeout) clearTimeout(chapterScrollTimeout);
+function showChapterScroll(number: string, title: string, description: string, theme?: "parchment" | "space") {
   chapterScrollNumber.textContent = number;
   chapterScrollTitle.textContent = title;
   chapterScrollDescription.textContent = description;
+  chapterScrollEl.classList.remove("theme-space");
+  if (theme === "space") chapterScrollEl.classList.add("theme-space");
   chapterScrollEl.classList.add("visible");
-  chapterScrollTimeout = setTimeout(() => {
-    chapterScrollEl.classList.remove("visible");
-    chapterScrollTimeout = null;
-  }, 5500);
 }
 
 function hideChapterScroll() {
-  if (chapterScrollTimeout) clearTimeout(chapterScrollTimeout);
-  chapterScrollTimeout = null;
-  chapterScrollEl.classList.remove("visible");
+  chapterScrollEl.classList.remove("visible", "theme-space");
 }
 
 chapterScrollDismiss.addEventListener("click", hideChapterScroll);
@@ -576,7 +570,7 @@ function enterScene(def: BookDef) {
           });
         }
 
-        // Load additional static scene models (e.g. lunar lander on moon)
+        // Load additional scene models (e.g. lunar lander on moon)
         if (def.sceneModels) {
           activeSceneModels.length = 0;
           def.sceneModels.forEach((sm) => {
@@ -589,7 +583,6 @@ function enterScene(def: BookDef) {
                 if (sm.scale != null) model.scale.setScalar(sm.scale);
                 if (sm.position) model.position.set(...sm.position);
                 if (sm.rotation) model.rotation.set(...sm.rotation);
-                // Disable shadows on scene models for better performance (moon/lander)
                 model.traverse((child) => {
                   if (child instanceof THREE.Mesh) {
                     child.castShadow = false;
@@ -598,6 +591,40 @@ function enterScene(def: BookDef) {
                 });
                 scene.add(model);
                 activeSceneModels.push(model);
+
+                if (sm.name) {
+                  const bubbleDiv = document.createElement("div");
+                  bubbleDiv.className = "npc-bubble";
+                  bubbleDiv.innerHTML =
+                    `<span class="npc-name">${sm.name}</span>` +
+                    `<span class="npc-hint">Press E to inspect</span>` +
+                    `<span class="npc-last-msg"></span>`;
+                  bubbleDiv.addEventListener("click", () => {
+                    const info = activeNpcs.find((n) => n.name === sm.name);
+                    if (info) openNpcChat(info);
+                  });
+
+                  const label = new CSS2DObject(bubbleDiv);
+                  const worldBox = new THREE.Box3().setFromObject(model);
+                  const modelHeight = worldBox.max.y - worldBox.min.y;
+                  const bubbleGroup = new THREE.Group();
+                  bubbleGroup.position.set(
+                    model.position.x,
+                    model.position.y + modelHeight * 0.5,
+                    model.position.z
+                  );
+                  bubbleGroup.add(label);
+                  scene.add(bubbleGroup);
+
+                  activeNpcs.push({
+                    name: sm.name,
+                    model,
+                    bubble: label,
+                    bubbleGroup,
+                    chatHistory: [],
+                    greeting: sm.greeting || "What would you like to know?",
+                  });
+                }
               },
               undefined,
               () => {}
@@ -644,7 +671,7 @@ function enterScene(def: BookDef) {
           loadingOverlay.style.transition = "none";
           narrativeTextEl.classList.remove("visible");
           if (def.chapterNumber) {
-            showChapterScroll(def.chapterNumber, def.sceneTitle, def.chapterDescription || "");
+            showChapterScroll(def.chapterNumber, def.sceneTitle, def.chapterDescription || "", def.chapterTheme);
           }
         }, 900);
         if (def.modelUrl) controlsHint.classList.add("visible");
@@ -1079,7 +1106,7 @@ function animate() {
     }
     updatePortalCheck();
   }
-  if (isInPortalDestination) updateNpcProximity();
+  if (activeNpcs.length > 0) updateNpcProximity();
   updateBookOpen(dt);
   if (!inScene) checkHover();
   if (controls.enabled) controls.update();

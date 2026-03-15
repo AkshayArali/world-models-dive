@@ -47,6 +47,7 @@ export interface BookDef {
   narrativeText?: string;
   chapterNumber?: string;
   chapterDescription?: string;
+  chapterTheme?: "parchment" | "space";
   locked?: boolean;
   splatQuality?: "low" | "medium" | "high";
   modelUrl?: string;

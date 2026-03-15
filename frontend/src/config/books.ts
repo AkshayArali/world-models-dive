@@ -23,6 +23,7 @@ export const BOOKS: BookDef[] = [
     narrativeText:
       "The enchanted ceiling of the Great Hall reflected a stormy sky. The Goblet of Fire flickered at the center, its blue flames casting dancing shadows across the long house tables...",
     chapterNumber: "Chapter XII",
+    chapterTheme: "parchment",
     chapterDescription:
       "The Great Hall of Hogwarts was alive with anticipation. Four long tables gleamed beneath the enchanted ceiling, whose clouds mimicked the storm raging outside. At the centre, the Goblet of Fire burned with an otherworldly blue flame, its magic crackling through the air as students from three schools gathered for the fateful Drawing.",
     locked: false,
@@ -89,6 +90,10 @@ export const BOOKS: BookDef[] = [
     sceneSubtitle: "The First Moon Landing",
     narrativeText:
       "The lunar module descended through the silence of space. Below, the grey expanse of the Moon stretched endlessly — craters, shadows, and the promise of one small step...",
+    chapterNumber: "Mission Log — Day 4",
+    chapterTheme: "space",
+    chapterDescription:
+      "July 20, 1969 — The Eagle has separated from Columbia. Armstrong and Aldrin guide the fragile craft toward the Sea of Tranquility, their instruments flickering in the pale glow of the lunar surface. Houston holds its breath. In a few minutes, for the first time in human history, boots will press into alien soil.",
     locked: false,
     splatQuality: "low",
     modelUrl: "./models/astronaut_run.fbx",
@@ -100,6 +105,9 @@ export const BOOKS: BookDef[] = [
         scale: 0.04,
         position: [5, 0.5, 8],
         rotation: [0, Math.PI / 4, 0],
+        name: "Lunar Module",
+        greeting:
+          "This is the Eagle — the Apollo 11 Lunar Module. On July 20, 1969, it carried Armstrong and Aldrin to the surface of the Moon. What would you like to know?",
       },
     ],
   },
