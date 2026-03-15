@@ -30,6 +30,7 @@ export interface PortalDef {
   targetSplatScale?: number;
   targetFloorY?: number;
   targetSceneModelScale?: number;
+  targetSpeedMultiplier?: number;
   targetCameraOffsetZ?: number;
   targetCameraOffsetY?: number;
   targetSceneModels?: SceneModelDef[];

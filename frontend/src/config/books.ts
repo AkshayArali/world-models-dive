@@ -49,6 +49,7 @@ export const BOOKS: BookDef[] = [
         targetModelRotation: [0, 0, 0],
         targetSplatScale: 18,
         targetFloorY: -7.2,
+        targetSpeedMultiplier: 6,
         targetCameraOffsetZ: 16,
         targetCameraOffsetY: 12,
         targetSceneModelScale: 0.75,
@@ -58,21 +59,21 @@ export const BOOKS: BookDef[] = [
             name: "Hermione Granger",
             greeting:
               "Oh, hello Harry! Have you finished your Potions essay yet? I've already written three rolls of parchment.",
-            position: [6, 0, 0],
+            position: [12, 0, 0],
           },
           {
             url: "./models/ronald.fbx",
             name: "Ron Weasley",
             greeting:
               "Oi, Harry! Fancy a game of wizard's chess? I've been practising — reckon I could beat anyone in Gryffindor.",
-            position: [-3, 0, -4],
+            position: [-6, 0, -10],
           },
           {
             url: "./models/dumbledore.fbx",
             name: "Albus Dumbledore",
             greeting:
               "Ah, Harry. I had a feeling we might cross paths tonight. Tell me, have you tried the lemon drops?",
-            position: [-4, 0, 6],
+            position: [-6, 0, 10],
           },
         ],
       },

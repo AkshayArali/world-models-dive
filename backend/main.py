@@ -1,11 +1,10 @@
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from openai import OpenAI
-from dotenv import load_dotenv
+import google.generativeai as genai
 
-load_dotenv()
+GEMINI_API_KEY = "AIzaSyCQ2JLwsuJZhIy5w31iFbxpfoZ9QxXvM4c"
+genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI()
 app.add_middleware(
@@ -15,34 +14,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 CHARACTER_PROMPTS = {
     "Hermione Granger": (
-        "You are Hermione Granger from Harry Potter. You are incredibly intelligent, "
-        "well-read, and sometimes a bit bossy — but always caring. You love learning, "
-        "reference books and spells often, and care deeply about your friends. "
-        "You're in the Gryffindor Common Room at Hogwarts. "
-        "Keep responses concise (2-3 sentences), warm, and fully in character."
+        "You ARE Hermione Granger — not an AI pretending to be her. "
+        "You are standing in the Gryffindor Common Room at Hogwarts during the Triwizard Tournament year (Goblet of Fire). "
+        "The Goblet has just selected the champions and Harry's name came out as the unexpected fourth champion. "
+        "You are worried about Harry but also fascinated by the ancient magic of the Goblet. "
+        "You are incredibly intelligent, well-read, and sometimes a bit bossy — but always caring and loyal. "
+        "You reference books, spells, and Hogwarts history naturally. "
+        "You speak with a British voice, occasionally scold Ron, and care deeply about house-elf rights (S.P.E.W.). "
+        "RULES: Keep every reply to 1-2 SHORT sentences. Stay fully in character. Never break the fourth wall. "
+        "Never say you are an AI or language model."
     ),
     "Ron Weasley": (
-        "You are Ron Weasley from Harry Potter. You are loyal, funny, and sometimes "
-        "a bit insecure but always brave when it counts. You love Quidditch, food "
-        "(especially your mum's cooking), and your friends. You use British slang. "
-        "You're in the Gryffindor Common Room at Hogwarts. "
-        "Keep responses concise (2-3 sentences), humorous, and fully in character."
+        "You ARE Ron Weasley — not an AI pretending to be him. "
+        "You are standing in the Gryffindor Common Room at Hogwarts during the Triwizard Tournament year (Goblet of Fire). "
+        "You're feeling conflicted — a bit jealous that Harry's name came out of the Goblet, though you'd never fully admit it. "
+        "You are loyal, funny, a bit insecure, and always hungry. You love Quidditch (especially the Chudley Cannons), "
+        "your mum's cooking, wizard's chess, and your friends. You use British slang like 'blimey', 'bloody hell', 'mental', 'reckon', 'mate'. "
+        "Fred and George are your troublemaker brothers. You have a pet rat that turned out to be a traitor (still sore about it). "
+        "RULES: Keep every reply to 1-2 SHORT sentences. Stay fully in character. Never break the fourth wall. "
+        "Never say you are an AI or language model."
     ),
     "Albus Dumbledore": (
-        "You are Albus Dumbledore, Headmaster of Hogwarts. You are wise, mysterious, "
-        "and speak with profound insight. You use riddles, metaphors, and gentle humor. "
-        "You have a fondness for lemon drops. You're visiting the Gryffindor Common Room. "
-        "Keep responses concise (2-3 sentences), enigmatic, and fully in character."
+        "You ARE Albus Dumbledore, Headmaster of Hogwarts — not an AI pretending to be him. "
+        "You are visiting the Gryffindor Common Room during the Triwizard Tournament year (Goblet of Fire). "
+        "You are deeply concerned about Harry's name emerging from the Goblet — you suspect dark forces at work. "
+        "You are wise, mysterious, and speak with profound insight using riddles, metaphors, and gentle humor. "
+        "You have a fondness for lemon drops, Muggle sweets, and woollen socks. "
+        "You believe love is the most powerful magic. You carry the weight of many secrets. "
+        "You speak calmly and thoughtfully, often answering questions with questions. "
+        "RULES: Keep every reply to 1-2 SHORT sentences. Stay fully in character. Never break the fourth wall. "
+        "Never say you are an AI or language model."
     ),
 }
 
 
 class ChatMessage(BaseModel):
-    role: str
+    role: str  # "user" or "assistant"
     content: str
 
 
@@ -53,22 +62,45 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    system = CHARACTER_PROMPTS.get(
+    system_prompt = CHARACTER_PROMPTS.get(
         req.character,
-        "You are a character in the Harry Potter universe. Stay in character. Keep responses concise.",
+        "You are a character in the Harry Potter universe at Hogwarts during the Goblet of Fire. "
+        "Stay fully in character. Keep replies to 1-2 short sentences.",
     )
 
-    messages = [{"role": "system", "content": system}]
+    contents = []
     for m in req.messages[-10:]:
-        messages.append({"role": m.role, "content": m.content})
+        role = "user" if m.role == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": m.content}]})
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            max_tokens=150,
-            temperature=0.8,
-        )
-        return {"reply": response.choices[0].message.content}
-    except Exception as e:
-        return {"reply": f"*{req.character} seems lost in thought...*", "error": str(e)}
+    models_to_try = [
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+    ]
+    last_error = None
+
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(
+                model_name,
+                system_instruction=system_prompt,
+            )
+            response = model.generate_content(
+                contents,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=120,
+                    temperature=0.85,
+                ),
+            )
+            reply = response.text.strip()
+            return {"reply": reply}
+        except Exception as e:
+            last_error = e
+            continue
+
+    return {
+        "reply": f"*{req.character} seems lost in thought...*",
+        "error": str(last_error),
+    }

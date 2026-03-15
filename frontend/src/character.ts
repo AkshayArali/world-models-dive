@@ -62,6 +62,7 @@ export function updateCharacterMovement(
     cameraIntroProgress: number;
     currentAction: THREE.AnimationAction | null;
     camera: THREE.PerspectiveCamera;
+    speedMultiplier?: number;
   }
 ) {
   const { activeModel, inScene, cameraIntroProgress, currentAction, camera } = deps;
@@ -76,7 +77,8 @@ export function updateCharacterMovement(
 
   const vertDir = (keys["space"] ? 1 : 0) + (keys["q"] ? -1 : 0);
   const sprinting = keys["shift"];
-  const speed = BASE_SPEED * (sprinting ? SPRINT_MULT : 1);
+  const speedMul = deps.speedMultiplier ?? 1;
+  const speed = BASE_SPEED * speedMul * (sprinting ? SPRINT_MULT : 1);
   const isMoving = moveDir.lengthSq() > 0 || vertDir !== 0;
 
   if (currentAction) {

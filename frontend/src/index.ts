@@ -148,6 +148,7 @@ setupKeyHandlers({
 let transitioningToSplat = false;
 let activePortalCameraOffsetZ: number | null = null;
 let activePortalCameraOffsetY: number | null = null;
+let activeSpeedMultiplier = 1;
 
 function updatePortalCheck() {
   if (!activeModel || !inScene || activePortals.length === 0 || transitioningToSplat || isInPortalDestination) return;
@@ -168,6 +169,7 @@ function transitionToSplat(portal: PortalDef) {
   isInPortalDestination = true; // block return immediately (even during load)
   activePortalCameraOffsetZ = portal.targetCameraOffsetZ ?? null;
   activePortalCameraOffsetY = portal.targetCameraOffsetY ?? null;
+  activeSpeedMultiplier = portal.targetSpeedMultiplier ?? 1;
   backBtn.style.display = "none";
   backBtn.style.pointerEvents = "none";
   backBtn.style.visibility = "hidden";
@@ -758,6 +760,7 @@ function enterScene(def: BookDef) {
 function resetToLibrary() {
   if (isInPortalDestination) return; // cannot go back from inner chapter
   hideChapterScroll();
+  activeSpeedMultiplier = 1;
   if (activeSplat) {
     scene.remove(activeSplat);
     activeSplat.dispose();
@@ -912,33 +915,6 @@ function renderChatMessages(npc: NpcInfo) {
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 }
 
-const DUMMY_REPLIES: Record<string, string[]> = {
-  "Hermione Granger": [
-    "Honestly, if you'd just read Hogwarts: A History, you'd already know the answer.",
-    "I've been practising the Patronus Charm all week. It's really quite advanced magic, you know.",
-    "The library closes at eight — we should hurry if we want to look up that potion.",
-    "Professor McGonagall said my Transfiguration essay was the best she'd seen in years!",
-    "Don't you think it's strange that Moody keeps watching Harry during lessons?",
-    "I wish Ron would take his studies more seriously. N.E.W.T.s are only two years away!",
-  ],
-  "Ron Weasley": [
-    "Blimey, I'm starving. Reckon the house-elves have any treacle tart left?",
-    "Did you see the Chudley Cannons match last weekend? Absolute disaster, mate.",
-    "Mum sent me a Howler last week — the whole common room heard it. Brilliant.",
-    "I'll tell you what, wizard's chess is the one thing I'll always beat Hermione at.",
-    "Fred and George have been testing their new sweets on first years again. Mental, those two.",
-    "Honestly, I don't fancy our chances in the Tournament. Have you seen Krum fly?",
-  ],
-  "Albus Dumbledore": [
-    "It does not do to dwell on dreams and forget to live, Harry.",
-    "Happiness can be found even in the darkest of times, if one only remembers to turn on the light.",
-    "Ah, I see you've discovered the Room of Requirement. Curious how it always knows what one needs.",
-    "I must confess a fondness for lemon drops. Would you care for one?",
-    "The truth — it is a beautiful and terrible thing, and should therefore be treated with great caution.",
-    "Nitwit! Blubber! Oddment! Tweak! ...Forgive me, I do enjoy a good nonsense now and then.",
-  ],
-};
-
 async function sendChatMessage(text: string) {
   if (!chatTarget || !text.trim()) return;
   const npc = chatTarget;
@@ -952,21 +928,35 @@ async function sendChatMessage(text: string) {
   chatMessagesEl.appendChild(typingDiv);
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 
-  await new Promise((r) => setTimeout(r, 600 + Math.random() * 800));
-  typingDiv.remove();
-
-  const pool = DUMMY_REPLIES[npc.name] || ["*nods thoughtfully*"];
-  const reply = pool[Math.floor(Math.random() * pool.length)];
-  npc.chatHistory.push({ role: "assistant", content: reply });
-  renderChatMessages(npc);
-  updateNpcBubbleText(npc, reply);
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        character: npc.name,
+        messages: npc.chatHistory,
+      }),
+    });
+    const data = await res.json();
+    typingDiv.remove();
+    const reply = data.reply || `*${npc.name} seems lost in thought...*`;
+    npc.chatHistory.push({ role: "assistant", content: reply });
+    renderChatMessages(npc);
+    updateNpcBubbleText(npc, reply);
+  } catch {
+    typingDiv.remove();
+    const fallback = `*${npc.name} seems lost in thought...*`;
+    npc.chatHistory.push({ role: "assistant", content: fallback });
+    renderChatMessages(npc);
+    updateNpcBubbleText(npc, fallback);
+  }
 }
 
 function updateNpcBubbleText(npc: NpcInfo, text: string) {
   const el = npc.bubble.element as HTMLElement;
   const lastMsgEl = el.querySelector(".npc-last-msg") as HTMLElement;
   if (lastMsgEl) {
-    const snippet = text.length > 60 ? text.slice(0, 57) + "..." : text;
+    const snippet = text.length > 35 ? text.slice(0, 32) + "..." : text;
     lastMsgEl.textContent = `"${snippet}"`;
     el.classList.add("has-message");
   }
@@ -1070,7 +1060,7 @@ function animate() {
 
   if (activeAnimMixer) activeAnimMixer.update(dt);
   for (const m of npcMixers) m.update(dt);
-  updateCharacterMovement(dt, { activeModel, inScene, cameraIntroProgress, currentAction, camera });
+  updateCharacterMovement(dt, { activeModel, inScene, cameraIntroProgress, currentAction, camera, speedMultiplier: activeSpeedMultiplier });
   if (activeModel && inScene) {
     if (cameraIntroProgress < 1) {
       cameraIntroProgress = updateCameraIntro(dt, { camera, controls, cameraIntroProgress });
