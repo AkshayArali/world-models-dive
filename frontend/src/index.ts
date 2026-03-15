@@ -21,6 +21,10 @@ interface PortalDef {
   targetModelPosition?: [number, number, number];
   /** Scale factor for the splat scene when entering (e.g. 2 = 200% bigger) */
   targetSplatScale?: number;
+  /** Y offset for NPC feet (negative = lower). Tune per room if NPCs fly or sink. */
+  targetFloorY?: number;
+  /** Scale multiplier for NPCs (default 1). Use same as targetModelScale to match Harry. */
+  targetSceneModelScale?: number;
   /** Additional character models in the portal destination (same scale as player) */
   targetSceneModels?: { url: string; position?: [number, number, number]; rotation?: [number, number, number] }[];
 }
@@ -75,13 +79,17 @@ const BOOKS: BookDef[] = [
         targetSplatUrl: "./models/GryffindorCommonRoom.spz",
         targetTitle: "Gryffindor Common Room",
         targetSubtitle: "The cozy fireside haven",
-        targetModelScale: 8, // Harry much bigger in Gryffindor scene only
+        targetModelScale: 8, // Harry scale in Common Room only (was 8; increase if still small)
         targetModelPosition: [0, 0, 0], // Harry in the middle
         targetSplatScale: 12, // Gryffindor Common Room — large, plenty of space
+        // targetSceneModelScale: 8, // NPCs same scale as Harry
+        targetFloorY: -7.2, // NPC feet Y (tune if flying or sinking: more negative = lower)
+        targetSceneModelScale: 3.5, // NPCs 3.5x bigger than Harry (height-matched, then scaled up to match)
+        // NPCs in a circle (radius 3.2), facing inward toward Harry at center
         targetSceneModels: [
-          { url: "./models/hermione.fbx", position: [2, 0, -1.5], rotation: [0, Math.PI / 2, 0] },
-          { url: "./models/ronald.fbx", position: [-2, 0, -1.5], rotation: [0, -Math.PI / 2, 0] },
-          { url: "./models/dumbledore.fbx", position: [0, 0, -3], rotation: [0, 0, 0] },
+          { url: "./models/hermione.fbx", position: [3.2, 0, 0] },
+          { url: "./models/ronald.fbx", position: [-1.6, 0, -2.77] },
+          { url: "./models/dumbledore.fbx", position: [-1.6, 0, 2.77] },
         ],
       },
     ],
@@ -726,12 +734,19 @@ function transitionToSplat(portal: PortalDef) {
               const model = isFbx ? (result as THREE.Group) : (result as { scene: THREE.Group }).scene;
               const box = new THREE.Box3().setFromObject(model);
               const npcHeight = box.max.y - box.min.y;
-              const s = npcHeight > 0 ? harryHeight / npcHeight : 1;
-              model.scale.setScalar(s);
+              const heightScale = npcHeight > 0 ? harryHeight / npcHeight : 1;
+              const sceneScale = portal.targetSceneModelScale ?? portal.targetModelScale ?? 1;
+              model.scale.setScalar(heightScale * sceneScale);
               box.setFromObject(model);
               const c = box.getCenter(new THREE.Vector3());
               model.position.set(-c.x, -box.min.y, -c.z);
-              if (sm.position) model.position.add(new THREE.Vector3(...sm.position));
+              if (sm.position) {
+                const [px, py = 0, pz] = sm.position;
+                const floorY = portal.targetFloorY ?? -2.2; // tune per room: more negative = lower
+                model.position.add(new THREE.Vector3(px, py + floorY, pz));
+                // Face center at our height only (no tilt) — lookAt(0,1,0) made them lie backwards
+                model.lookAt(0, model.position.y, 0);
+              }
               if (sm.rotation) model.rotation.set(...sm.rotation);
               model.traverse((child) => {
                 if (child instanceof THREE.Mesh) {
