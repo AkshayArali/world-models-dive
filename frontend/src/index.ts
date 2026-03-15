@@ -21,6 +21,8 @@ interface PortalDef {
   targetModelPosition?: [number, number, number];
   /** Scale factor for the splat scene when entering (e.g. 2 = 200% bigger) */
   targetSplatScale?: number;
+  /** Additional character models in the portal destination (same scale as player) */
+  targetSceneModels?: { url: string; position?: [number, number, number]; rotation?: [number, number, number] }[];
 }
 interface BookDef {
   id: string;
@@ -75,7 +77,12 @@ const BOOKS: BookDef[] = [
         targetSubtitle: "The cozy fireside haven",
         targetModelScale: 8, // Harry much bigger in Gryffindor scene only
         targetModelPosition: [0, 0, 0], // Harry in the middle
-        targetSplatScale: 6, // Gryffindor Common Room much bigger
+        targetSplatScale: 12, // Gryffindor Common Room — large, plenty of space
+        targetSceneModels: [
+          { url: "./models/hermione.fbx", position: [2, 0, -1.5], rotation: [0, Math.PI / 2, 0] },
+          { url: "./models/ronald.fbx", position: [-2, 0, -1.5], rotation: [0, -Math.PI / 2, 0] },
+          { url: "./models/dumbledore.fbx", position: [0, 0, -3], rotation: [0, 0, 0] },
+        ],
       },
     ],
   },
@@ -700,13 +707,55 @@ function transitionToSplat(portal: PortalDef) {
           activeModel.position.set(...portal.targetModelPosition);
         }
       }
+
+      // Load Hermione, Ron, Dumbledore in common room — same scale as Harry
+      const playerScale = (currentBookDef?.modelScale ?? 0.25) * (portal.targetModelScale ?? 1);
+      let harryHeight = 0;
+      if (activeModel) {
+        const harryBox = new THREE.Box3().setFromObject(activeModel);
+        harryHeight = harryBox.max.y - harryBox.min.y;
+      }
+      if (portal.targetSceneModels?.length && harryHeight > 0) {
+        activeSceneModels.length = 0;
+        portal.targetSceneModels.forEach((sm) => {
+          const isFbx = sm.url.toLowerCase().endsWith(".fbx");
+          const loader = isFbx ? fbxLoader : gltfLoader;
+          loader.load(
+            sm.url,
+            (result: THREE.Group | { scene: THREE.Group }) => {
+              const model = isFbx ? (result as THREE.Group) : (result as { scene: THREE.Group }).scene;
+              const box = new THREE.Box3().setFromObject(model);
+              const npcHeight = box.max.y - box.min.y;
+              const s = npcHeight > 0 ? harryHeight / npcHeight : 1;
+              model.scale.setScalar(s);
+              box.setFromObject(model);
+              const c = box.getCenter(new THREE.Vector3());
+              model.position.set(-c.x, -box.min.y, -c.z);
+              if (sm.position) model.position.add(new THREE.Vector3(...sm.position));
+              if (sm.rotation) model.rotation.set(...sm.rotation);
+              model.traverse((child) => {
+                if (child instanceof THREE.Mesh) {
+                  child.castShadow = false;
+                  child.receiveShadow = false;
+                }
+              });
+              scene.add(model);
+              activeSceneModels.push(model);
+            },
+            undefined,
+            () => {}
+          );
+        });
+      }
+
       if (portal.targetTitle) sceneTitleEl.textContent = portal.targetTitle;
       if (portal.targetSubtitle) sceneSubtitleEl.textContent = portal.targetSubtitle;
       isInPortalDestination = true; // cannot go back to previous chapter
       backBtn.style.display = "none";
       backBtn.style.pointerEvents = "none";
       backBtn.style.visibility = "hidden";
-      sceneInfo.style.pointerEvents = "none"; // entire panel non-interactive so nothing can trigger back
+      sceneInfo.style.display = "none"; // hide entire UI — nothing to click, cannot go back
+      sceneInfo.style.pointerEvents = "none";
       // Block browser Back button now that we're in the next chapter
       history.pushState({ portalDestination: true }, "", location.href);
       const popHandler = () => {
@@ -763,6 +812,7 @@ renderer.domElement.addEventListener("mousemove", (e) => {
   mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 });
 renderer.domElement.addEventListener("click", () => {
+  if (inScene || isInPortalDestination) return; // never open book when inside a scene or common room
   if (hoveredBook && !hoveredBook.def.locked && !isOpening) startOpenBook(hoveredBook);
 });
 
