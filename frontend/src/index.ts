@@ -5,113 +5,16 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { SplatMesh, SparkRenderer } from "@sparkjsdev/spark";
 
-// ── Book catalog ──
-interface AnimDef { name: string; url: string; }
-interface PortalDef {
-  position: [number, number, number];
-  radius: number;
-  targetSplatUrl: string;
-  targetTitle?: string;
-  targetSubtitle?: string;
-  /** Optional text for bubble above portal (defaults to targetTitle); ready for LLM integration */
-  bubbleText?: string;
-  /** Scale factor for character when entering this scene only (e.g. 2 = 2x bigger) */
-  targetModelScale?: number;
-  /** Position [x, y, z] to place character when entering this scene (e.g. center) */
-  targetModelPosition?: [number, number, number];
-  /** Scale factor for the splat scene when entering (e.g. 2 = 200% bigger) */
-  targetSplatScale?: number;
-  /** Y offset for NPC feet (negative = lower). Tune per room if NPCs fly or sink. */
-  targetFloorY?: number;
-  /** Scale multiplier for NPCs (default 1). Use same as targetModelScale to match Harry. */
-  targetSceneModelScale?: number;
-  /** Additional character models in the portal destination (same scale as player) */
-  targetSceneModels?: { url: string; position?: [number, number, number]; rotation?: [number, number, number] }[];
-}
-interface BookDef {
-  id: string;
-  title: string;
-  author: string;
-  coverUrl: string;
-  splatUrl: string;
-  sceneTitle: string;
-  sceneSubtitle: string;
-  locked?: boolean;
-  /** "low" = fewer splats rendered, better FPS for heavy scenes */
-  splatQuality?: "low" | "medium" | "high";
-  modelUrl?: string;
-  modelScale?: number;
-  modelPosition?: [number, number, number];
-  modelRotation?: [number, number, number];
-  extraAnims?: AnimDef[];
-  portals?: PortalDef[];
-  /** Additional static scene models (e.g. lunar lander on moon) */
-  sceneModels?: { url: string; scale?: number; position?: [number, number, number]; rotation?: [number, number, number] }[];
-}
-
-const BOOKS: BookDef[] = [
-  {
-    id: "kite_runner",
-    title: "The Kite Runner",
-    author: "Khaled Hosseini",
-    coverUrl: "./books/KiteRunner.jpg",
-    splatUrl: "./splats/sensai.spz",
-    sceneTitle: "Kabul, 1975",
-    sceneSubtitle: "The kite-fighting tournament that changed everything",
-  },
-  {
-    id: "ww2",
-    title: "Harry Potter",
-    author: "J.K. Rowling",
-    coverUrl: "./books/gobletoffire.jpg",
-    splatUrl: "./models/HogwartsGreatHall.spz",
-    sceneTitle: "The Goblet of Fire",
-    sceneSubtitle: "Hogwarts — The Triwizard Tournament",
-    locked: false,
-    splatQuality: "low",
-    modelUrl: "./models/harry.fbx",
-    modelScale: 0.25,
-    modelRotation: [0, Math.PI, 0], // face backward (into scene)
-    portals: [
-      {
-        position: [3, 0, 2],
-        radius: 1.5, // slightly larger so portal is easier to enter
-        targetSplatUrl: "./models/GryffindorCommonRoom.spz",
-        targetTitle: "Gryffindor Common Room",
-        targetSubtitle: "The cozy fireside haven",
-        targetModelScale: 8, // Harry scale in Common Room only (was 8; increase if still small)
-        targetModelPosition: [0, 0, 0], // Harry in the middle
-        targetSplatScale: 12, // Gryffindor Common Room — large, plenty of space
-        // targetSceneModelScale: 8, // NPCs same scale as Harry
-        targetFloorY: -7.2, // NPC feet Y (tune if flying or sinking: more negative = lower)
-        targetSceneModelScale: 3.5, // NPCs 3.5x bigger than Harry (height-matched, then scaled up to match)
-        // NPCs in a circle (radius 3.2), facing inward toward Harry at center
-        targetSceneModels: [
-          { url: "./models/hermione.fbx", position: [3.2, 0, 0] },
-          { url: "./models/ronald.fbx", position: [-1.6, 0, -2.77] },
-          { url: "./models/dumbledore.fbx", position: [-1.6, 0, 2.77] },
-        ],
-      },
-    ],
-  },
-  {
-    id: "apollo",
-    title: "Apollo 13",
-    author: "Jim Lovell",
-    coverUrl: "./books/Apollo11.jpg",
-    splatUrl: "./splats/LunarCrateredLandscape2.spz",
-    sceneTitle: "Apollo 11",
-    sceneSubtitle: "The First Moon Landing",
-    locked: false,
-    splatQuality: "low", // reduce splat load for smooth moon performance
-    modelUrl: "./models/astronaut_run.fbx",
-    modelScale: 0.3,
-    modelRotation: [0, Math.PI, 0], // face backward (into scene) so W moves forward
-    sceneModels: [
-      { url: "./models/lander.fbx", scale: 0.04, position: [5, 0.5, 8], rotation: [0, Math.PI / 4, 0] },
-    ],
-  },
-];
+import type { BookDef, BookMesh, PortalDef } from "./types";
+import { BOOKS } from "./config/books";
+import { easeOutCubic, easeInOutCubic, smoothClamp } from "./utils/easing";
+import { PAGE_COUNT, ANIM_DURATION, DEFAULT_FOV } from "./constants";
+import { createLibrary } from "./scene/createLibrary";
+import { createBooks } from "./scene/createBooks";
+import { createPortalMesh } from "./scene/createPortal";
+import { setupKeyHandlers, updateCharacterMovement, CAM_OFFSET, CAM_LOOK_OFFSET } from "./character";
+import { updateCameraIntro, updateThirdPersonCamera } from "./camera";
+import { curlPage } from "./animation/bookOpen";
 
 // ── DOM ──
 const loadingOverlay = document.getElementById("loading-overlay")!;
@@ -159,34 +62,6 @@ scene.add(spark);
 
 const DEFAULT_PIXEL_RATIO = Math.min(window.devicePixelRatio, 2);
 
-function applySplatQuality(q: "low" | "medium" | "high" | undefined) {
-  renderer.shadowMap.enabled = false; // splats don't use shadows
-  if (q === "low") {
-    spark.enableLod = true;
-    spark.lodSplatCount = 80000;
-    spark.lodSplatScale = 0.5;
-    renderer.setPixelRatio(1);
-  } else if (q === "medium") {
-    spark.enableLod = true;
-    spark.lodSplatCount = 400000;
-    spark.lodSplatScale = 0.8;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-  } else {
-    spark.enableLod = true;
-    spark.lodSplatCount = 800000;
-    spark.lodSplatScale = 1.0;
-    renderer.setPixelRatio(DEFAULT_PIXEL_RATIO);
-  }
-}
-
-function restoreSplatQuality() {
-  spark.enableLod = true;
-  spark.lodSplatCount = 800000;
-  spark.lodSplatScale = 1.0;
-  renderer.setPixelRatio(DEFAULT_PIXEL_RATIO);
-  renderer.shadowMap.enabled = true;
-}
-
 // ── Camera ──
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
 camera.position.set(0, 2.5, 7);
@@ -203,275 +78,11 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.3;
 controls.enablePan = false;
 
-// ── Library world (everything toggled off when viewing a splat scene) ──
-const libraryGroup = new THREE.Group();
-scene.add(libraryGroup);
-
-// ── Sky ──
-const skyGeo = new THREE.SphereGeometry(80, 32, 32);
-const skyMat = new THREE.ShaderMaterial({
-  side: THREE.BackSide,
-  depthWrite: false,
-  uniforms: {},
-  vertexShader: `
-    varying vec3 vWorldPos;
-    void main() {
-      vec4 wp = modelMatrix * vec4(position, 1.0);
-      vWorldPos = wp.xyz;
-      gl_Position = projectionMatrix * viewMatrix * wp;
-    }
-  `,
-  fragmentShader: `
-    varying vec3 vWorldPos;
-    void main() {
-      float h = normalize(vWorldPos).y;
-      vec3 horizon = vec3(0.25, 0.35, 0.50);
-      vec3 zenith  = vec3(0.08, 0.12, 0.28);
-      vec3 ground  = vec3(0.12, 0.20, 0.12);
-      vec3 col = h > 0.0
-        ? mix(horizon, zenith, smoothstep(0.0, 0.6, h))
-        : mix(horizon, ground, smoothstep(0.0, -0.15, h));
-      gl_FragColor = vec4(col, 1.0);
-    }
-  `,
-});
-libraryGroup.add(new THREE.Mesh(skyGeo, skyMat));
-
-// ── Stars ──
-const starCount = 2500;
-const starGeo = new THREE.BufferGeometry();
-const starPos = new Float32Array(starCount * 3);
-for (let i = 0; i < starCount; i++) {
-  const theta = Math.random() * Math.PI * 2;
-  const phi = Math.acos(Math.random() * 0.85 + 0.15);
-  const r = 70;
-  starPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
-  starPos[i * 3 + 1] = r * Math.cos(phi);
-  starPos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
-}
-starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
-libraryGroup.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
-  color: 0xffffff, size: 0.18, sizeAttenuation: true, transparent: true, opacity: 0.9,
-})));
-
-// ── Ground ── (64×64 = fewer vertices, faster)
-const groundGeo = new THREE.PlaneGeometry(120, 120, 64, 64);
-groundGeo.rotateX(-Math.PI / 2);
-const posAttr = groundGeo.getAttribute("position");
-for (let i = 0; i < posAttr.count; i++) {
-  const x = posAttr.getX(i), z = posAttr.getZ(i);
-  const dist = Math.sqrt(x * x + z * z);
-  const h = Math.sin(x * 0.08) * 0.35 + Math.sin(z * 0.06 + 1) * 0.25 + Math.sin(x * 0.15 + z * 0.12) * 0.12 - dist * 0.004;
-  posAttr.setY(i, Math.max(h, -0.3));
-}
-groundGeo.computeVertexNormals();
-libraryGroup.add(new THREE.Mesh(groundGeo, new THREE.ShaderMaterial({
-  uniforms: {},
-  vertexShader: `
-    varying vec3 vWorldPos; varying vec3 vNormal;
-    void main() {
-      vec4 wp = modelMatrix * vec4(position, 1.0);
-      vWorldPos = wp.xyz; vNormal = normalize(normalMatrix * normal);
-      gl_Position = projectionMatrix * viewMatrix * wp;
-    }
-  `,
-  fragmentShader: `
-    varying vec3 vWorldPos; varying vec3 vNormal;
-    void main() {
-      float dist = length(vWorldPos.xz);
-      vec3 near = vec3(0.14, 0.30, 0.10); vec3 far = vec3(0.08, 0.18, 0.07);
-      vec3 col = mix(near, far, smoothstep(4.0, 35.0, dist));
-      float light = dot(vNormal, normalize(vec3(0.3, 1.0, 0.2))) * 0.5 + 0.5;
-      col *= 0.5 + light * 0.5;
-      float fog = 1.0 - exp(-0.002 * dist * dist);
-      col = mix(col, vec3(0.16, 0.22, 0.32), fog);
-      gl_FragColor = vec4(col, 1.0);
-    }
-  `,
-})));
-
-// ── Lighting ──
-libraryGroup.add(new THREE.AmbientLight(0x8899bb, 1.6));
-const moon = new THREE.DirectionalLight(0xaabbdd, 2.5);
-moon.position.set(8, 18, 6);
-libraryGroup.add(moon);
-const fill = new THREE.DirectionalLight(0x99aacc, 1.0);
-fill.position.set(-6, 10, -4);
-libraryGroup.add(fill);
-const bookSpot = new THREE.PointLight(0xfff0dd, 5, 14, 1.5);
-bookSpot.position.set(0, 4, 2.5);
-libraryGroup.add(bookSpot);
-
-// ── Glow light that intensifies when book opens ──
-const portalLight = new THREE.PointLight(0xfff8e0, 0, 8, 1.5);
-libraryGroup.add(portalLight);
-
-// ── 3D Books ──
-const textureLoader = new THREE.TextureLoader();
-const bookGroup = new THREE.Group();
-libraryGroup.add(bookGroup);
-
-const PAGE_SEGS = 16;
-interface PagePivot {
-  pivot: THREE.Group;
-  sheet: THREE.Mesh;
-  restPositions: Float32Array;
-  delay: number;
-}
-interface BookMesh {
-  group: THREE.Group;
-  def: BookDef;
-  coverPivot: THREE.Group;
-  pagePivots: PagePivot[];
-  savedRotation: THREE.Euler;
-  savedPosition: THREE.Vector3;
-}
-const bookMeshes: BookMesh[] = [];
+// ── Library world (sky, ground, lights, books, fireflies) ──
+const { group: libraryGroup, ffGeo, ffMat, ffData, ffCount, portalLight } = createLibrary(scene);
+const { bookMeshes } = createBooks(BOOKS, libraryGroup);
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-
-const PAGE_COUNT = 20;
-const W = 1.05, H = 1.55, DEPTH = 0.24;
-const COVER_T = 0.025;
-
-function createBook(def: BookDef, index: number, total: number): BookMesh {
-  const root = new THREE.Group();
-
-  const leatherColor = def.locked ? 0x444455 : 0x3a2215;
-  const coverMat = new THREE.MeshStandardMaterial({ color: leatherColor, roughness: 0.65, metalness: 0.05 });
-  const innerCoverMat = new THREE.MeshStandardMaterial({ color: 0x8b7355, roughness: 0.8 });
-  const pageFaceMat = new THREE.MeshStandardMaterial({ color: 0xf5f0e5, roughness: 0.92 });
-  const pageEdgeMat = new THREE.MeshStandardMaterial({ color: 0xe0d8c8, roughness: 0.85 });
-
-  // Back cover
-  const back = new THREE.Mesh(
-    new THREE.BoxGeometry(W, H, COVER_T),
-    [coverMat, coverMat, coverMat, coverMat, innerCoverMat, coverMat],
-  );
-  back.position.z = -DEPTH / 2 + COVER_T / 2;
-  root.add(back);
-
-  // Spine
-  const spine = new THREE.Mesh(new THREE.BoxGeometry(COVER_T * 2, H, DEPTH + COVER_T), coverMat);
-  spine.position.x = -W / 2 - COVER_T * 0.5;
-  root.add(spine);
-
-  // Gold spine accents
-  const goldMat = new THREE.MeshBasicMaterial({ color: 0xd4a44a });
-  for (let s = 0; s < 3; s++) {
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.012, H * 0.55), goldMat);
-    strip.position.set(-W / 2 - COVER_T * 1.51, 0, -DEPTH * 0.2 + s * DEPTH * 0.2);
-    strip.rotation.y = Math.PI / 2;
-    root.add(strip);
-  }
-
-  // Page block (visible edge of closed pages)
-  const blockDepth = DEPTH - COVER_T * 2 - 0.006;
-  const pageBlock = new THREE.Mesh(
-    new THREE.BoxGeometry(W - 0.03, H - 0.04, blockDepth),
-    pageEdgeMat,
-  );
-  pageBlock.position.z = 0;
-  root.add(pageBlock);
-
-  // Flippable pages — PlaneGeometry grid so vertices can curl
-  const pagePivots: PagePivot[] = [];
-  const pageW = W - 0.02;
-  const pageH = H - 0.04;
-  const pageZone = DEPTH - COVER_T * 2 - 0.01;
-
-  for (let p = 0; p < PAGE_COUNT; p++) {
-    const pivot = new THREE.Group();
-    const zPos = DEPTH / 2 - COVER_T - 0.005 - (pageZone / PAGE_COUNT) * p;
-    pivot.position.set(-W / 2 + 0.01, 0, zPos);
-
-    const geo = new THREE.PlaneGeometry(pageW, pageH, PAGE_SEGS, 1);
-    geo.translate(pageW / 2, 0, 0);
-    const restPositions = new Float32Array(geo.attributes.position.array);
-
-    const mat = pageFaceMat.clone();
-    mat.side = THREE.DoubleSide;
-    const sheet = new THREE.Mesh(geo, mat);
-    pivot.add(sheet);
-
-    root.add(pivot);
-    pagePivots.push({ pivot, sheet, restPositions, delay: p * 0.03 });
-  }
-
-  // Front cover on pivot
-  const coverPivot = new THREE.Group();
-  coverPivot.position.set(-W / 2, 0, DEPTH / 2 - COVER_T / 2);
-
-  const frontCoverMat = new THREE.MeshStandardMaterial({ color: leatherColor, roughness: 0.6, metalness: 0.05 });
-  if (def.coverUrl) {
-    textureLoader.load(def.coverUrl, (tex) => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      frontCoverMat.map = tex;
-      frontCoverMat.color.set(0xffffff);
-      frontCoverMat.needsUpdate = true;
-    });
-  }
-
-  const frontCover = new THREE.Mesh(
-    new THREE.BoxGeometry(W, H, COVER_T),
-    [coverMat, coverMat, coverMat, coverMat, frontCoverMat, innerCoverMat],
-  );
-  frontCover.position.x = W / 2;
-  coverPivot.add(frontCover);
-  root.add(coverPivot);
-
-  // Position in arc — modest spread
-  const spread = 3.5;
-  const arcRadians = Math.PI * 0.4;
-  const angleStep = arcRadians / Math.max(total - 1, 1);
-  const startAngle = -arcRadians / 2;
-  const angle = startAngle + index * angleStep;
-
-  root.position.set(Math.sin(angle) * spread, H / 2 + 0.12, -Math.cos(angle) * spread + 2);
-  root.lookAt(new THREE.Vector3(0, H / 2, 8));
-  root.rotation.x = -0.03;
-  root.userData.bookId = def.id;
-  root.userData.hoverY = root.position.y;
-
-  const savedPosition = root.position.clone();
-  const savedRotation = root.rotation.clone();
-
-  // Pedestal + glow
-  const glow = new THREE.PointLight(def.locked ? 0x667788 : 0xddccaa, 2.0, 4, 1.5);
-  glow.position.set(Math.sin(angle) * spread, 0.5, -Math.cos(angle) * spread + 2);
-  libraryGroup.add(glow);
-  const ped = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.42, 0.48, 0.08, 24),
-    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.3, metalness: 0.7 }),
-  );
-  ped.position.set(Math.sin(angle) * spread, 0.04, -Math.cos(angle) * spread + 2);
-  libraryGroup.add(ped);
-
-  return { group: root, def, coverPivot, pagePivots, savedRotation, savedPosition };
-}
-
-BOOKS.forEach((def, i) => {
-  const bm = createBook(def, i, BOOKS.length);
-  bookGroup.add(bm.group);
-  bookMeshes.push(bm);
-});
-
-// ── Fireflies ──
-const ffCount = 80;
-const ffGeo = new THREE.BufferGeometry();
-const ffPos2 = new Float32Array(ffCount * 3);
-const ffData: { baseY: number; speed: number; radius: number; angle: number }[] = [];
-for (let i = 0; i < ffCount; i++) {
-  const a = Math.random() * Math.PI * 2, r = 2 + Math.random() * 14, y = 0.3 + Math.random() * 3.5;
-  ffPos2[i * 3] = Math.cos(a) * r; ffPos2[i * 3 + 1] = y; ffPos2[i * 3 + 2] = Math.sin(a) * r;
-  ffData.push({ baseY: y, speed: 0.15 + Math.random() * 0.45, radius: r, angle: a });
-}
-ffGeo.setAttribute("position", new THREE.BufferAttribute(ffPos2, 3));
-const ffMat = new THREE.PointsMaterial({
-  color: 0xffee88, size: 0.1, sizeAttenuation: true,
-  transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false,
-});
-libraryGroup.add(new THREE.Points(ffGeo, ffMat));
 
 // ── Interaction state ──
 let hoveredBook: BookMesh | null = null;
@@ -492,150 +103,20 @@ let isInPortalDestination = false; // true when in Gryffindor — cannot go back
 const gltfLoader = new GLTFLoader();
 const fbxLoader = new FBXLoader();
 
-function createPortalMesh(portal: PortalDef): THREE.Group {
-  const group = new THREE.Group();
-  group.position.set(...portal.position);
-  // Simplified geometry for performance (fewer segments)
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(portal.radius, 0.06, 8, 16),
-    new THREE.MeshBasicMaterial({
-      color: 0x4499ff,
-      transparent: true,
-      opacity: 0.9,
-      side: THREE.DoubleSide,
-    }),
-  );
-  ring.rotation.x = Math.PI / 2;
-  group.add(ring);
-  const inner = new THREE.Mesh(
-    new THREE.RingGeometry(portal.radius * 0.4, portal.radius * 0.9, 16),
-    new THREE.MeshBasicMaterial({
-      color: 0x88ccff,
-      transparent: true,
-      opacity: 0.4,
-      side: THREE.DoubleSide,
-    }),
-  );
-  inner.rotation.x = -Math.PI / 2;
-  group.add(inner);
-
-  // Text bubble above portal (clean, minimal; ready for LLM content)
-  const bubbleText = portal.bubbleText ?? portal.targetTitle ?? "Enter";
-  const bubbleEl = document.createElement("div");
-  bubbleEl.className = "portal-bubble";
-  bubbleEl.textContent = bubbleText;
-  const bubbleLabel = new CSS2DObject(bubbleEl);
-  bubbleLabel.position.set(0, portal.radius + 1.0, 0);
-  group.add(bubbleLabel);
-
-  return group;
-}
-
 // ── Character controls ──
-const keys: Record<string, boolean> = {};
-const BASE_SPEED = 1.2;
-const SPRINT_MULT = 2.5;
-const TURN_SPEED = 6.0;
-const CAM_OFFSET = new THREE.Vector3(0, 1.4, 3.0);
-const CAM_LOOK_OFFSET = new THREE.Vector3(0, 0.8, 0);
-const DEFAULT_FOV = 50;
-const CAMERA_INTRO_DURATION = 0.8; // fast revolve from front to back
 let modelSpawnPos = new THREE.Vector3();
-let modelSpawnRot = 0;
+const modelSpawnRotRef = { value: 0 };
 let cameraIntroProgress = 1; // 1 = done, 0 = starting (camera in front)
 
-// Ensure canvas can receive focus for WASD
-renderer.domElement.setAttribute("tabindex", "0");
-renderer.domElement.style.outline = "none";
-
-window.addEventListener("keydown", (e) => {
-  const k = e.key.toLowerCase();
-  keys[k] = true;
-  if (e.key === " ") keys["space"] = true;
-  if (e.shiftKey) keys["shift"] = true;
-
-  // When in scene with character, prevent browser defaults (Space=scroll, Enter=activate focused button)
-  if (inScene && activeModel && ["w", "a", "s", "d", "e", "q", " ", "enter"].includes(k)) {
-    e.preventDefault();
-  }
-  if (!inScene) return;
-
-  if (e.key === "[") {
-    camera.fov = Math.max(20, camera.fov - 5);
-    camera.updateProjectionMatrix();
-  }
-  if (e.key === "]") {
-    camera.fov = Math.min(110, camera.fov + 5);
-    camera.updateProjectionMatrix();
-  }
-  if (e.key === "0" && activeModel) {
-    activeModel.position.copy(modelSpawnPos);
-    activeModel.rotation.y = modelSpawnRot;
-    camera.fov = DEFAULT_FOV;
-    camera.updateProjectionMatrix();
-  }
+setupKeyHandlers({
+  renderer,
+  inScene: () => inScene,
+  activeModel: () => activeModel,
+  modelSpawnPos,
+  modelSpawnRot: modelSpawnRotRef,
+  camera,
+  DEFAULT_FOV,
 });
-window.addEventListener("keyup", (e) => {
-  keys[e.key.toLowerCase()] = false;
-  if (e.key === " ") keys["space"] = false;
-  if (!e.shiftKey) keys["shift"] = false;
-});
-
-function updateCharacterMovement(dt: number) {
-  if (!activeModel || !inScene) return;
-  if (cameraIntroProgress < 1) return; // no movement until camera revolved to back
-
-  // W=forward, S=backward, A=left, D=right | E/Space=up, Q=down
-  const moveDir = new THREE.Vector3();
-  if (keys["w"]) moveDir.z -= 1;
-  if (keys["s"]) moveDir.z += 1;
-  if (keys["a"]) moveDir.x -= 1;
-  if (keys["d"]) moveDir.x += 1;
-
-  const vertDir = (keys["e"] || keys["space"] ? 1 : 0) + (keys["q"] ? -1 : 0);
-  const sprinting = keys["shift"];
-  const speed = BASE_SPEED * (sprinting ? SPRINT_MULT : 1);
-  const isMoving = moveDir.lengthSq() > 0 || vertDir !== 0;
-
-  if (currentAction) {
-    const wasPaused = currentAction.paused;
-    currentAction.paused = !isMoving;
-    if (isMoving) {
-      if (wasPaused) currentAction.play();
-      currentAction.timeScale = sprinting ? 2.0 : 1.0;
-    } else {
-      currentAction.timeScale = 1.0;
-      if (!wasPaused) currentAction.reset(); // return to standing pose
-    }
-  }
-
-  if (vertDir !== 0) {
-    activeModel.position.y += vertDir * speed * dt;
-  }
-
-  if (moveDir.lengthSq() === 0) return;
-  moveDir.normalize();
-
-  // Camera-relative: W=into scene (forward), S=back, A=left, D=right
-  const camForward = new THREE.Vector3();
-  camera.getWorldDirection(camForward);
-  camForward.y = 0;
-  camForward.normalize();
-  const camRight = new THREE.Vector3().crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
-
-  const worldDir = new THREE.Vector3()
-    .addScaledVector(camRight, moveDir.x)
-    .addScaledVector(camForward, -moveDir.z)
-    .normalize();
-
-  activeModel.position.addScaledVector(worldDir, speed * dt);
-
-  const targetAngle = Math.atan2(worldDir.x, worldDir.z);
-  let angleDiff = targetAngle - activeModel.rotation.y;
-  while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-  while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-  activeModel.rotation.y += angleDiff * Math.min(1, TURN_SPEED * dt);
-}
 
 let transitioningToSplat = false;
 
@@ -789,36 +270,6 @@ function transitionToSplat(portal: PortalDef) {
   // Don't add to scene until loaded — prev room assets are fully removed during load
 }
 
-function updateCameraIntro(dt: number) {
-  if (cameraIntroProgress >= 1) return;
-  cameraIntroProgress = Math.min(1, cameraIntroProgress + dt / CAMERA_INTRO_DURATION);
-  const t = cameraIntroProgress;
-  const eased = t * t * (3 - 2 * t); // smoothstep for smooth revolve
-  const angle = eased * Math.PI; // start 0, end PI — orbit from +Z to -Z
-  const radius = 4;
-  camera.position.set(radius * Math.sin(angle), 1.5, radius * Math.cos(angle));
-  controls.target.set(0, 0.8, 0);
-}
-
-function updateThirdPersonCamera(dt: number) {
-  if (!activeModel || !inScene) return;
-  if (cameraIntroProgress < 1) return; // use camera intro until done
-
-  const modelPos = activeModel.position;
-  const behind = new THREE.Vector3(0, 0, 1)
-    .applyAxisAngle(new THREE.Vector3(0, 1, 0), activeModel.rotation.y);
-
-  const desiredPos = new THREE.Vector3()
-    .copy(modelPos)
-    .add(new THREE.Vector3(0, CAM_OFFSET.y, 0))
-    .addScaledVector(behind, CAM_OFFSET.z);
-
-  const camSmooth = 1 - Math.pow(0.01, dt);
-  camera.position.lerp(desiredPos, camSmooth);
-
-  const lookAt = new THREE.Vector3().copy(modelPos).add(CAM_LOOK_OFFSET);
-  controls.target.lerp(lookAt, camSmooth);
-}
 let cameraStartPos = new THREE.Vector3();
 let cameraStartTarget = new THREE.Vector3();
 
@@ -866,8 +317,6 @@ function checkHover() {
 //    0.50–0.80  Golden glow intensifies from the pages
 //    0.70–1.00  Clean white fade
 //
-const ANIM_DURATION = 2.5;
-
 function startOpenBook(bm: BookMesh) {
   isOpening = true;
   openingBook = bm;
@@ -880,42 +329,6 @@ function startOpenBook(bm: BookMesh) {
   renderer.domElement.style.cursor = "default";
   cameraStartPos.copy(camera.position);
   cameraStartTarget.copy(controls.target);
-}
-
-function curlPage(pp: PagePivot, flipT: number) {
-  const pos = pp.sheet.geometry.attributes.position;
-  const arr = pos.array as Float32Array;
-  const rest = pp.restPositions;
-
-  if (flipT <= 0) {
-    arr.set(rest);
-    pos.needsUpdate = true;
-    pp.sheet.geometry.computeVertexNormals();
-    return;
-  }
-
-  const eased = easeOutCubic(flipT);
-  const totalAngle = -Math.PI * 0.93 * eased;
-  const curlStrength = Math.sin(flipT * Math.PI) * 0.4;
-  const pw = W - 0.02;
-
-  for (let v = 0, n = pos.count; v < n; v++) {
-    const rx = rest[v * 3];
-    const ry = rest[v * 3 + 1];
-
-    const frac = Math.max(0, Math.min(rx / pw, 1));
-    const angle = totalAngle * frac;
-    const radius = rx;
-
-    const lift = curlStrength * frac * Math.sin(frac * Math.PI) * 0.25;
-
-    arr[v * 3]     = radius * Math.cos(angle);
-    arr[v * 3 + 1] = ry + lift;
-    arr[v * 3 + 2] = -radius * Math.sin(angle);
-  }
-
-  pos.needsUpdate = true;
-  pp.sheet.geometry.computeVertexNormals();
 }
 
 function updateBookOpen(dt: number) {
@@ -1113,7 +526,7 @@ function enterScene(def: BookDef) {
           scene.add(model);
         activeModel = model;
         modelSpawnPos.copy(model.position);
-        modelSpawnRot = model.rotation.y;
+        modelSpawnRotRef.value = model.rotation.y;
 
         // Focus canvas when character loads so WASD works
         renderer.domElement.focus();
@@ -1302,14 +715,6 @@ backBtn.addEventListener("click", () => {
   resetToLibrary();
 });
 
-// ── Easing helpers ──
-function easeOutCubic(t: number) { return 1 - Math.pow(1 - t, 3); }
-function easeInOutCubic(t: number) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
-
-function smoothClamp(t: number, start: number, end: number) {
-  return Math.max(0, Math.min((t - start) / (end - start), 1));
-}
-
 // ── Animation loop ──
 const clock = new THREE.Clock();
 
@@ -1342,10 +747,13 @@ function animate() {
   ffMat.opacity = 0.5 + Math.sin(t * 1.8) * 0.2;
 
   if (activeAnimMixer) activeAnimMixer.update(dt);
-  updateCharacterMovement(dt);
+  updateCharacterMovement(dt, { activeModel, inScene, cameraIntroProgress, currentAction, camera });
   if (activeModel && inScene) {
-    if (cameraIntroProgress < 1) updateCameraIntro(dt);
-    else updateThirdPersonCamera(dt);
+    if (cameraIntroProgress < 1) {
+      cameraIntroProgress = updateCameraIntro(dt, { camera, controls, cameraIntroProgress });
+    } else {
+      updateThirdPersonCamera(dt, { activeModel, inScene, camera, controls, cameraIntroProgress });
+    }
     updatePortalCheck();
   }
   updateBookOpen(dt);

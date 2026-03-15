@@ -1,0 +1,63 @@
+import type { BookDef } from "../types";
+
+export const BOOKS: BookDef[] = [
+  {
+    id: "kite_runner",
+    title: "The Kite Runner",
+    author: "Khaled Hosseini",
+    coverUrl: "./books/KiteRunner.jpg",
+    splatUrl: "./splats/sensai.spz",
+    sceneTitle: "Kabul, 1975",
+    sceneSubtitle: "The kite-fighting tournament that changed everything",
+  },
+  {
+    id: "ww2",
+    title: "Harry Potter",
+    author: "J.K. Rowling",
+    coverUrl: "./books/gobletoffire.jpg",
+    splatUrl: "./models/HogwartsGreatHall.spz",
+    sceneTitle: "The Goblet of Fire",
+    sceneSubtitle: "Hogwarts — The Triwizard Tournament",
+    locked: false,
+    splatQuality: "low",
+    modelUrl: "./models/harry.fbx",
+    modelScale: 0.25,
+    modelRotation: [0, Math.PI, 0],
+    portals: [
+      {
+        position: [3, 0, 2],
+        radius: 1.5,
+        targetSplatUrl: "./models/GryffindorCommonRoom.spz",
+        targetTitle: "Gryffindor Common Room",
+        targetSubtitle: "The cozy fireside haven",
+        targetModelScale: 12,
+        targetModelPosition: [0, 0, 0],
+        targetSplatScale: 12,
+        targetFloorY: -7.2,
+        targetSceneModelScale: 1,
+        targetSceneModels: [
+          { url: "./models/hermione.fbx", position: [3.2, 0, 0] },
+          { url: "./models/ronald.fbx", position: [-1.6, 0, -2.77] },
+          { url: "./models/dumbledore.fbx", position: [-1.6, 0, 2.77] },
+        ],
+      },
+    ],
+  },
+  {
+    id: "apollo",
+    title: "Apollo 13",
+    author: "Jim Lovell",
+    coverUrl: "./books/Apollo11.jpg",
+    splatUrl: "./splats/LunarCrateredLandscape2.spz",
+    sceneTitle: "Apollo 11",
+    sceneSubtitle: "The First Moon Landing",
+    locked: false,
+    splatQuality: "low",
+    modelUrl: "./models/astronaut_run.fbx",
+    modelScale: 0.3,
+    modelRotation: [0, Math.PI, 0],
+    sceneModels: [
+      { url: "./models/lander.fbx", scale: 0.04, position: [5, 0.5, 8], rotation: [0, Math.PI / 4, 0] },
+    ],
+  },
+];
