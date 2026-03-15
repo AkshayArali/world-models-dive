@@ -4,159 +4,606 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Turning Points</title>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=Inter:wght@300;400&display=swap" rel="stylesheet">
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Inter:wght@300;400;500&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { background: #000; overflow: hidden; color: #fff; }
-      canvas { display: block; }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: #000;
+        overflow: hidden;
+        color: #fff;
+      }
+      canvas {
+        display: block;
+      }
 
+      /* ── Dashboard / Library ── */
       #ui-overlay {
-        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-        z-index: 10; pointer-events: none;
-        display: flex; flex-direction: column;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 10;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
 
       #header {
         text-align: center;
-        padding-top: 40px;
+        padding-top: 48px;
         pointer-events: none;
-        transition: opacity 0.5s ease;
+        transition: opacity 0.6s ease;
+      }
+      .ornament-line {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 240px;
+        margin: 10px auto;
+        gap: 16px;
+        opacity: 0.35;
+      }
+      .ornament-line::before,
+      .ornament-line::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(
+          to right,
+          transparent,
+          rgba(212, 175, 55, 0.6),
+          transparent
+        );
+      }
+      .ornament-diamond {
+        font-size: 8px;
+        color: rgba(212, 175, 55, 0.6);
+        letter-spacing: 6px;
       }
       #header h1 {
-        font-family: 'Cormorant Garamond', serif;
-        font-size: 52px; font-weight: 300; letter-spacing: 12px;
+        font-family: "Cormorant Garamond", serif;
+        font-size: 56px;
+        font-weight: 300;
+        letter-spacing: 14px;
         text-transform: uppercase;
-        color: rgba(255,255,255,0.9);
-        text-shadow: 0 0 40px rgba(255,255,255,0.15);
+        color: rgba(255, 255, 255, 0.92);
+        text-shadow: 0 0 60px rgba(212, 175, 55, 0.12),
+          0 0 120px rgba(212, 175, 55, 0.06);
       }
-      #header p {
-        font-family: 'Inter', sans-serif;
-        font-size: 14px; color: rgba(255,255,255,0.4);
-        letter-spacing: 3px; margin-top: 6px;
+      #header .tagline {
+        font-family: "Crimson Text", serif;
+        font-style: italic;
+        font-size: 16px;
+        color: rgba(245, 230, 200, 0.45);
+        letter-spacing: 2px;
+        margin-top: 4px;
       }
 
+      /* ── Book tooltip ── */
       #book-tooltip {
-        position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
-        font-family: 'Cormorant Garamond', serif;
-        font-size: 22px; color: rgba(255,255,255,0.8);
-        background: rgba(0,0,0,0.5);
-        padding: 12px 32px;
-        border-radius: 8px;
-        border: 1px solid rgba(255,255,255,0.08);
-        backdrop-filter: blur(12px);
+        position: fixed;
+        bottom: 64px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-family: "Cormorant Garamond", serif;
+        font-size: 22px;
+        color: rgba(245, 230, 200, 0.9);
+        background: rgba(15, 12, 8, 0.7);
+        padding: 14px 36px;
+        border-radius: 6px;
+        border: 1px solid rgba(212, 175, 55, 0.15);
+        backdrop-filter: blur(16px);
         opacity: 0;
         transition: opacity 0.3s ease;
         pointer-events: none;
         white-space: nowrap;
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.3);
       }
-      #book-tooltip.visible { opacity: 1; }
+      #book-tooltip.visible {
+        opacity: 1;
+      }
 
+      /* ── Hint ── */
       #hint {
-        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-        font-family: 'Inter', sans-serif;
-        font-size: 11px; color: rgba(255,255,255,0.25);
-        letter-spacing: 2px;
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-family: "Crimson Text", serif;
+        font-style: italic;
+        font-size: 13px;
+        color: rgba(245, 230, 200, 0.22);
+        letter-spacing: 1.5px;
         pointer-events: none;
         transition: opacity 0.5s ease;
       }
 
-      /* Loading overlay */
+      /* ── Loading overlay with narrative ── */
       #loading-overlay {
-        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-        background: radial-gradient(ellipse at center, #fffbe8 0%, #fff 60%, #f0ebe0 100%);
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: radial-gradient(
+          ellipse at center,
+          #fffbe8 0%,
+          #faf6eb 40%,
+          #f0ebe0 100%
+        );
         z-index: 100;
-        align-items: center; justify-content: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         flex-direction: column;
         transition: opacity 0.6s ease;
         pointer-events: none;
       }
       #loading-overlay h2 {
-        font-family: 'Cormorant Garamond', serif;
-        font-size: 28px; font-weight: 300; letter-spacing: 8px;
-        text-transform: uppercase; color: rgba(60,50,30,0.7);
+        font-family: "Cormorant Garamond", serif;
+        font-size: 26px;
+        font-weight: 300;
+        letter-spacing: 6px;
+        text-transform: uppercase;
+        color: rgba(60, 50, 30, 0.7);
+      }
+      #narrative-text {
+        font-family: "Crimson Text", serif;
+        font-style: italic;
+        font-size: 16px;
+        line-height: 1.8;
+        color: rgba(80, 65, 40, 0.6);
+        max-width: 520px;
+        text-align: center;
+        margin-top: 20px;
+        padding: 0 24px;
+        opacity: 0;
+        transition: opacity 1s ease 0.3s;
+      }
+      #narrative-text.visible {
+        opacity: 1;
       }
       .loader {
-        width: 32px; height: 32px; margin-top: 24px;
-        border: 2px solid rgba(60,50,30,0.1);
-        border-top-color: rgba(60,50,30,0.4);
+        width: 28px;
+        height: 28px;
+        margin-top: 28px;
+        border: 1.5px solid rgba(60, 50, 30, 0.08);
+        border-top-color: rgba(60, 50, 30, 0.35);
         border-radius: 50%;
-        animation: spin 0.7s linear infinite;
+        animation: spin 0.8s linear infinite;
       }
-      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
 
-      /* Scene view (when inside a book) */
+      /* ── Scene info ── */
       #scene-info {
         display: none;
-        position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-        background: rgba(0,0,0,0.6);
-        padding: 16px 32px;
-        border-radius: 8px;
-        border: 1px solid rgba(255,255,255,0.08);
-        backdrop-filter: blur(10px);
+        position: fixed;
+        bottom: 28px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(10, 8, 5, 0.7);
+        padding: 14px 32px;
+        border-radius: 6px;
+        border: 1px solid rgba(212, 175, 55, 0.1);
+        backdrop-filter: blur(12px);
         text-align: center;
         z-index: 10;
         pointer-events: auto;
       }
       #scene-info h2 {
-        font-family: 'Cormorant Garamond', serif;
-        font-size: 20px; font-weight: 400; letter-spacing: 4px; text-transform: uppercase;
+        font-family: "Cormorant Garamond", serif;
+        font-size: 18px;
+        font-weight: 400;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: rgba(245, 230, 200, 0.85);
       }
       #scene-info p {
-        font-family: 'Inter', sans-serif;
-        font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 4px;
+        font-family: "Crimson Text", serif;
+        font-style: italic;
+        font-size: 12px;
+        color: rgba(245, 230, 200, 0.4);
+        margin-top: 3px;
       }
+
+      /* ── Back button ── */
       #back-btn {
-        position: fixed; top: 24px; right: 24px; left: auto;
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        left: auto;
         padding: 8px 20px;
-        background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15);
-        color: #fff; border-radius: 4px; cursor: pointer;
-        font-family: 'Inter', sans-serif;
-        font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
-        transition: background 0.2s;
+        background: rgba(10, 8, 5, 0.6);
+        border: 1px solid rgba(212, 175, 55, 0.15);
+        color: rgba(245, 230, 200, 0.7);
+        border-radius: 4px;
+        cursor: pointer;
+        font-family: "Inter", sans-serif;
+        font-size: 11px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        transition: all 0.25s ease;
         z-index: 20;
       }
-      #back-btn:hover { background: rgba(255,255,255,0.15); }
+      #back-btn:hover {
+        background: rgba(212, 175, 55, 0.12);
+        border-color: rgba(212, 175, 55, 0.3);
+        color: rgba(245, 230, 200, 0.95);
+      }
 
-      /* Portal text bubbles (above each portal in 3D) */
+      /* ── Controls hint ── */
+      #controls-hint {
+        position: fixed;
+        bottom: 20px;
+        right: 24px;
+        font-family: "Inter", sans-serif;
+        font-size: 10px;
+        color: rgba(245, 230, 200, 0.25);
+        letter-spacing: 0.5px;
+        z-index: 10;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.5s ease;
+      }
+      #controls-hint.visible {
+        opacity: 1;
+      }
+      #controls-hint kbd {
+        display: inline-block;
+        padding: 2px 6px;
+        border: 1px solid rgba(245, 230, 200, 0.15);
+        border-radius: 3px;
+        font-family: "Inter", sans-serif;
+        font-size: 9px;
+        color: rgba(245, 230, 200, 0.4);
+        margin-right: 2px;
+        background: rgba(245, 230, 200, 0.04);
+      }
+
+      /* ── Portal bubbles (3D portals) ── */
       .portal-bubble {
-        font-family: 'Inter', sans-serif;
+        font-family: "Inter", sans-serif;
         font-size: 13px;
         font-weight: 400;
         letter-spacing: 0.5px;
-        color: rgba(255,255,255,0.95);
-        background: rgba(0,0,0,0.65);
+        color: rgba(255, 255, 255, 0.95);
+        background: rgba(0, 0, 0, 0.65);
         padding: 8px 14px;
         border-radius: 6px;
         white-space: nowrap;
-        border: 1px solid rgba(255,255,255,0.12);
+        border: 1px solid rgba(255, 255, 255, 0.12);
         backdrop-filter: blur(8px);
-        box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
         transform: translate(-50%, -100%);
         user-select: none;
+      }
+
+      /* ── NPC speech bubbles ── */
+      .npc-bubble {
+        font-family: "Crimson Text", serif;
+        color: rgba(245, 230, 200, 0.92);
+        background: rgba(18, 14, 8, 0.88);
+        padding: 8px 16px;
+        border-radius: 20px;
+        border: 1px solid rgba(212, 175, 55, 0.2);
+        backdrop-filter: blur(10px);
+        transform: translate(-50%, -100%);
+        user-select: none;
+        pointer-events: auto;
+        cursor: pointer;
+        transition: all 0.35s ease;
+        text-align: center;
+        max-width: 220px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      }
+      .npc-bubble:hover {
+        background: rgba(30, 24, 14, 0.95);
+        border-color: rgba(212, 175, 55, 0.4);
+        box-shadow: 0 4px 24px rgba(212, 175, 55, 0.1);
+      }
+      .npc-bubble .npc-name {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        display: block;
+      }
+      .npc-bubble .npc-hint {
+        display: none;
+        font-family: "Inter", sans-serif;
+        font-size: 9px;
+        color: rgba(212, 175, 55, 0.6);
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        margin-top: 3px;
+      }
+      .npc-bubble.nearby {
+        border-color: rgba(212, 175, 55, 0.45);
+        box-shadow: 0 4px 28px rgba(212, 175, 55, 0.15);
+      }
+      .npc-bubble.nearby .npc-hint {
+        display: block;
+      }
+      .npc-bubble .npc-last-msg {
+        display: none;
+        font-style: italic;
+        font-size: 12px;
+        color: rgba(245, 230, 200, 0.55);
+        margin-top: 4px;
+        white-space: normal;
+        max-width: 190px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      .npc-bubble.has-message .npc-last-msg {
+        display: -webkit-box;
+      }
+
+      /* ── Chat panel ── */
+      #chat-panel {
+        position: fixed;
+        top: 0;
+        right: -400px;
+        width: 380px;
+        height: 100vh;
+        background: linear-gradient(
+          170deg,
+          rgba(24, 20, 14, 0.96) 0%,
+          rgba(32, 26, 18, 0.97) 100%
+        );
+        border-left: 1px solid rgba(212, 175, 55, 0.12);
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(24px);
+        pointer-events: auto;
+        box-shadow: -8px 0 40px rgba(0, 0, 0, 0.4);
+      }
+      #chat-panel.open {
+        right: 0;
+      }
+
+      #chat-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 24px 16px;
+        border-bottom: 1px solid rgba(212, 175, 55, 0.1);
+      }
+      #chat-character-info {
+        display: flex;
+        flex-direction: column;
+      }
+      #chat-character-name {
+        font-family: "Cormorant Garamond", serif;
+        font-size: 22px;
+        font-weight: 500;
+        color: rgba(245, 230, 200, 0.92);
+        letter-spacing: 1px;
+      }
+      #chat-character-subtitle {
+        font-family: "Crimson Text", serif;
+        font-style: italic;
+        font-size: 12px;
+        color: rgba(212, 175, 55, 0.4);
+        margin-top: 2px;
+      }
+      #chat-close {
+        width: 32px;
+        height: 32px;
+        border: 1px solid rgba(245, 230, 200, 0.1);
+        border-radius: 50%;
+        background: transparent;
+        color: rgba(245, 230, 200, 0.5);
+        font-size: 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+      }
+      #chat-close:hover {
+        border-color: rgba(245, 230, 200, 0.3);
+        color: rgba(245, 230, 200, 0.9);
+        background: rgba(245, 230, 200, 0.05);
+      }
+
+      #chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px 20px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(212, 175, 55, 0.15) transparent;
+      }
+      #chat-messages::-webkit-scrollbar {
+        width: 4px;
+      }
+      #chat-messages::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      #chat-messages::-webkit-scrollbar-thumb {
+        background: rgba(212, 175, 55, 0.15);
+        border-radius: 2px;
+      }
+
+      .chat-msg {
+        max-width: 85%;
+        padding: 10px 16px;
+        border-radius: 16px;
+        line-height: 1.55;
+        animation: msgIn 0.3s ease;
+      }
+      @keyframes msgIn {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .chat-msg.assistant {
+        align-self: flex-start;
+        font-family: "Crimson Text", serif;
+        font-size: 15px;
+        color: rgba(245, 230, 200, 0.88);
+        background: rgba(212, 175, 55, 0.08);
+        border: 1px solid rgba(212, 175, 55, 0.1);
+        border-bottom-left-radius: 4px;
+      }
+      .chat-msg.user {
+        align-self: flex-end;
+        font-family: "Inter", sans-serif;
+        font-size: 13px;
+        color: rgba(245, 230, 200, 0.8);
+        background: rgba(245, 230, 200, 0.06);
+        border: 1px solid rgba(245, 230, 200, 0.08);
+        border-bottom-right-radius: 4px;
+      }
+      .chat-msg.typing {
+        color: rgba(212, 175, 55, 0.5);
+        font-style: italic;
+      }
+      .chat-msg.error {
+        color: rgba(200, 100, 100, 0.7);
+        font-style: italic;
+      }
+      .chat-msg.system {
+        align-self: center;
+        font-family: "Crimson Text", serif;
+        font-style: italic;
+        font-size: 13px;
+        color: rgba(212, 175, 55, 0.35);
+        background: none;
+        border: none;
+        text-align: center;
+        padding: 4px 0;
+      }
+
+      #chat-input-area {
+        display: flex;
+        gap: 8px;
+        padding: 16px 20px 20px;
+        border-top: 1px solid rgba(212, 175, 55, 0.08);
+      }
+      #chat-input {
+        flex: 1;
+        padding: 10px 16px;
+        background: rgba(245, 230, 200, 0.04);
+        border: 1px solid rgba(212, 175, 55, 0.12);
+        border-radius: 20px;
+        color: rgba(245, 230, 200, 0.85);
+        font-family: "Crimson Text", serif;
+        font-size: 14px;
+        outline: none;
+        transition: border-color 0.2s ease;
+      }
+      #chat-input::placeholder {
+        color: rgba(245, 230, 200, 0.25);
+        font-style: italic;
+      }
+      #chat-input:focus {
+        border-color: rgba(212, 175, 55, 0.3);
+      }
+      #chat-send {
+        width: 40px;
+        height: 40px;
+        border: 1px solid rgba(212, 175, 55, 0.2);
+        border-radius: 50%;
+        background: rgba(212, 175, 55, 0.08);
+        color: rgba(212, 175, 55, 0.7);
+        font-size: 18px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      #chat-send:hover {
+        background: rgba(212, 175, 55, 0.15);
+        border-color: rgba(212, 175, 55, 0.4);
+        color: rgba(212, 175, 55, 0.95);
       }
     </style>
   </head>
   <body>
-
-    <div id="loading-overlay" style="display:none; opacity:0;">
+    <!-- Loading overlay with narrative -->
+    <div id="loading-overlay" style="display: none; opacity: 0">
       <h2>Entering the story...</h2>
+      <p id="narrative-text"></p>
       <div class="loader"></div>
     </div>
 
+    <!-- Dashboard / Library -->
     <div id="ui-overlay">
       <div id="header">
+        <div class="ornament-line">
+          <span class="ornament-diamond">&#9670;</span>
+        </div>
         <h1>Turning Points</h1>
-        <p>Choose a book. Step inside. Change the story.</p>
+        <p class="tagline">Choose a book. Step inside. Change the story.</p>
+        <div class="ornament-line">
+          <span class="ornament-diamond">&#9670;</span>
+        </div>
       </div>
     </div>
 
     <div id="book-tooltip"></div>
     <div id="hint">Click a book to enter its world</div>
 
+    <!-- Scene view -->
     <div id="scene-info">
       <h2 id="scene-title"></h2>
       <p id="scene-subtitle"></p>
-      <button id="back-btn" tabindex="-1">← Back to Library</button>
+      <button id="back-btn" tabindex="-1">&larr; Back to Library</button>
+    </div>
+
+    <!-- Controls hint -->
+    <div id="controls-hint">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move &nbsp;&nbsp;
+      <kbd>E</kbd> Talk &nbsp;&nbsp; <kbd>Shift</kbd> Sprint
+    </div>
+
+    <!-- Chat panel -->
+    <div id="chat-panel">
+      <div id="chat-header">
+        <div id="chat-character-info">
+          <span id="chat-character-name"></span>
+          <span id="chat-character-subtitle">In conversation</span>
+        </div>
+        <button id="chat-close">&times;</button>
+      </div>
+      <div id="chat-messages"></div>
+      <div id="chat-input-area">
+        <input
+          id="chat-input"
+          type="text"
+          placeholder="Say something..."
+          autocomplete="off"
+        />
+        <button id="chat-send">&rarr;</button>
+      </div>
     </div>
 
     <script type="module" src="/src/index.ts"></script>

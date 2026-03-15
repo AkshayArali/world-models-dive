@@ -9,6 +9,8 @@ export const BOOKS: BookDef[] = [
     splatUrl: "./splats/sensai.spz",
     sceneTitle: "Kabul, 1975",
     sceneSubtitle: "The kite-fighting tournament that changed everything",
+    narrativeText:
+      "The streets of Kabul hummed with the excitement of the annual kite-fighting tournament. Amir clutched the string, heart pounding, as the winter wind carried a thousand kites across a cloudless sky...",
   },
   {
     id: "ww2",
@@ -18,11 +20,15 @@ export const BOOKS: BookDef[] = [
     splatUrl: "./models/HogwartsGreatHall.spz",
     sceneTitle: "The Goblet of Fire",
     sceneSubtitle: "Hogwarts — The Triwizard Tournament",
+    narrativeText:
+      "The enchanted ceiling of the Great Hall reflected a stormy sky. The Goblet of Fire flickered at the center, its blue flames casting dancing shadows across the long house tables...",
     locked: false,
     splatQuality: "low",
     modelUrl: "./models/harry.fbx",
-    modelScale: 0.25,
-    modelRotation: [0, Math.PI, 0],
+    modelScale: 0.45,
+    modelRotation: [0, 0, 0],
+    sceneCameraOffsetY: 3,
+    sceneCameraOffsetZ: 6,
     portals: [
       {
         position: [3, 0, 2],
@@ -30,15 +36,38 @@ export const BOOKS: BookDef[] = [
         targetSplatUrl: "./models/GryffindorCommonRoom.spz",
         targetTitle: "Gryffindor Common Room",
         targetSubtitle: "The cozy fireside haven",
-        targetModelScale: 10,
-        targetModelPosition: [0, -6.2, 1.5],
-        targetSplatScale: 12,
+        targetNarrativeText:
+          "The portrait of the Fat Lady swung open. The familiar warmth of the Gryffindor Common Room enveloped Harry — crackling fire, worn armchairs, and the quiet murmur of friends...",
+        targetModelScale: 34,
+        targetModelPosition: [0, -7.2, 1.5],
+        targetModelRotation: [0, 0, 0],
+        targetSplatScale: 18,
         targetFloorY: -7.2,
-        targetSceneModelScale: 1,
+        targetCameraOffsetZ: 10,
+        targetCameraOffsetY: 5,
+        targetSceneModelScale: 0.75,
         targetSceneModels: [
-          { url: "./models/hermione.fbx", position: [3.2, 0, 0] },
-          { url: "./models/ronald.fbx", position: [-1.6, 0, -2.77] },
-          { url: "./models/dumbledore.fbx", position: [-1.6, 0, 2.77] },
+          {
+            url: "./models/hermione.fbx",
+            name: "Hermione Granger",
+            greeting:
+              "Oh, hello Harry! Have you finished your Potions essay yet? I've already written three rolls of parchment.",
+            position: [6, 0, 0],
+          },
+          {
+            url: "./models/ronald.fbx",
+            name: "Ron Weasley",
+            greeting:
+              "Oi, Harry! Fancy a game of wizard's chess? I've been practising — reckon I could beat anyone in Gryffindor.",
+            position: [-4, 0, -6],
+          },
+          {
+            url: "./models/dumbledore.fbx",
+            name: "Albus Dumbledore",
+            greeting:
+              "Ah, Harry. I had a feeling we might cross paths tonight. Tell me, have you tried the lemon drops?",
+            position: [-4, 0, 6],
+          },
         ],
       },
     ],
@@ -51,13 +80,20 @@ export const BOOKS: BookDef[] = [
     splatUrl: "./splats/LunarCrateredLandscape2.spz",
     sceneTitle: "Apollo 11",
     sceneSubtitle: "The First Moon Landing",
+    narrativeText:
+      "The lunar module descended through the silence of space. Below, the grey expanse of the Moon stretched endlessly — craters, shadows, and the promise of one small step...",
     locked: false,
     splatQuality: "low",
     modelUrl: "./models/astronaut_run.fbx",
     modelScale: 0.3,
     modelRotation: [0, Math.PI, 0],
     sceneModels: [
-      { url: "./models/lander.fbx", scale: 0.04, position: [5, 0.5, 8], rotation: [0, Math.PI / 4, 0] },
+      {
+        url: "./models/lander.fbx",
+        scale: 0.04,
+        position: [5, 0.5, 8],
+        rotation: [0, Math.PI / 4, 0],
+      },
     ],
   },
 ];

@@ -29,24 +29,29 @@ export function updateThirdPersonCamera(
     camera: THREE.PerspectiveCamera;
     controls: { target: THREE.Vector3 };
     cameraIntroProgress: number;
+    cameraOffsetZ?: number;
+    cameraOffsetY?: number;
   }
 ) {
   const { activeModel, inScene, camera, controls, cameraIntroProgress } = deps;
   if (!activeModel || !inScene) return;
   if (cameraIntroProgress < 1) return;
 
+  const offsetZ = deps.cameraOffsetZ ?? CAM_OFFSET.z;
+  const offsetY = deps.cameraOffsetY ?? CAM_OFFSET.y;
   const modelPos = activeModel.position;
-  const behind = new THREE.Vector3(0, 0, 1)
+  const behind = new THREE.Vector3(0, 0, -1)
     .applyAxisAngle(new THREE.Vector3(0, 1, 0), activeModel.rotation.y);
 
   const desiredPos = new THREE.Vector3()
     .copy(modelPos)
-    .add(new THREE.Vector3(0, CAM_OFFSET.y, 0))
-    .addScaledVector(behind, CAM_OFFSET.z);
+    .add(new THREE.Vector3(0, offsetY, 0))
+    .addScaledVector(behind, offsetZ);
 
   const camSmooth = 1 - Math.pow(0.01, dt);
   camera.position.lerp(desiredPos, camSmooth);
 
   const lookAt = new THREE.Vector3().copy(modelPos).add(CAM_LOOK_OFFSET);
   controls.target.lerp(lookAt, camSmooth);
+  camera.lookAt(controls.target);
 }

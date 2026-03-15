@@ -17,6 +17,8 @@ export function setupKeyHandlers(deps: {
   renderer.domElement.style.outline = "none";
 
   window.addEventListener("keydown", (e) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
     const k = e.key.toLowerCase();
     keys[k] = true;
     if (e.key === " ") keys["space"] = true;
@@ -44,6 +46,8 @@ export function setupKeyHandlers(deps: {
   });
 
   window.addEventListener("keyup", (e) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
     keys[e.key.toLowerCase()] = false;
     if (e.key === " ") keys["space"] = false;
     if (!e.shiftKey) keys["shift"] = false;
@@ -70,7 +74,7 @@ export function updateCharacterMovement(
   if (keys["a"]) moveDir.x -= 1;
   if (keys["d"]) moveDir.x += 1;
 
-  const vertDir = (keys["e"] || keys["space"] ? 1 : 0) + (keys["q"] ? -1 : 0);
+  const vertDir = (keys["space"] ? 1 : 0) + (keys["q"] ? -1 : 0);
   const sprinting = keys["shift"];
   const speed = BASE_SPEED * (sprinting ? SPRINT_MULT : 1);
   const isMoving = moveDir.lengthSq() > 0 || vertDir !== 0;
@@ -91,23 +95,25 @@ export function updateCharacterMovement(
     activeModel.position.y += vertDir * speed * dt;
   }
 
-  if (moveDir.lengthSq() === 0) return;
-  moveDir.normalize();
-
   const camForward = new THREE.Vector3();
   camera.getWorldDirection(camForward);
   camForward.y = 0;
   camForward.normalize();
   const camRight = new THREE.Vector3().crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
 
-  const worldDir = new THREE.Vector3()
-    .addScaledVector(camRight, moveDir.x)
-    .addScaledVector(camForward, -moveDir.z)
-    .normalize();
+  let targetAngle: number;
+  if (moveDir.lengthSq() > 0) {
+    moveDir.normalize();
+    const worldDir = new THREE.Vector3()
+      .addScaledVector(camRight, moveDir.x)
+      .addScaledVector(camForward, -moveDir.z)
+      .normalize();
+    activeModel.position.addScaledVector(worldDir, speed * dt);
+    targetAngle = Math.atan2(worldDir.x, worldDir.z);
+  } else {
+    targetAngle = Math.atan2(camForward.x, camForward.z);
+  }
 
-  activeModel.position.addScaledVector(worldDir, speed * dt);
-
-  const targetAngle = Math.atan2(worldDir.x, worldDir.z);
   let angleDiff = targetAngle - activeModel.rotation.y;
   while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
   while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;

@@ -5,7 +5,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { SplatMesh, SparkRenderer } from "@sparkjsdev/spark";
 
-import type { BookDef, BookMesh, PortalDef } from "./types";
+import type { BookDef, BookMesh, PortalDef, SceneModelDef } from "./types";
 import { BOOKS } from "./config/books";
 import { easeOutCubic, easeInOutCubic, smoothClamp } from "./utils/easing";
 import { PAGE_COUNT, ANIM_DURATION, DEFAULT_FOV } from "./constants";
@@ -25,6 +25,14 @@ const sceneInfo = document.getElementById("scene-info")!;
 const sceneTitleEl = document.getElementById("scene-title")!;
 const sceneSubtitleEl = document.getElementById("scene-subtitle")!;
 const backBtn = document.getElementById("back-btn")!;
+const narrativeTextEl = document.getElementById("narrative-text")!;
+const controlsHint = document.getElementById("controls-hint")!;
+const chatPanel = document.getElementById("chat-panel")!;
+const chatCharName = document.getElementById("chat-character-name")!;
+const chatMessagesEl = document.getElementById("chat-messages")!;
+const chatInput = document.getElementById("chat-input") as HTMLInputElement;
+const chatSendBtn = document.getElementById("chat-send")!;
+const chatCloseBtn = document.getElementById("chat-close")!;
 
 // ── Renderer ── (antialias: false = better perf for splats, no visual benefit)
 const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -99,9 +107,23 @@ const activeSceneModels: THREE.Object3D[] = [];
 const activePortals: { def: PortalDef; mesh: THREE.Group }[] = [];
 let inScene = false;
 let currentBookDef: BookDef | null = null;
-let isInPortalDestination = false; // true when in Gryffindor — cannot go back to previous chapter
+let isInPortalDestination = false;
 const gltfLoader = new GLTFLoader();
 const fbxLoader = new FBXLoader();
+
+// ── NPC interaction state ──
+interface NpcInfo {
+  name: string;
+  model: THREE.Object3D;
+  bubble: CSS2DObject;
+  bubbleGroup: THREE.Group;
+  chatHistory: { role: string; content: string }[];
+  greeting: string;
+}
+const activeNpcs: NpcInfo[] = [];
+const npcMixers: THREE.AnimationMixer[] = [];
+let chatTarget: NpcInfo | null = null;
+let chatOpen = false;
 
 // ── Character controls ──
 let modelSpawnPos = new THREE.Vector3();
@@ -119,6 +141,8 @@ setupKeyHandlers({
 });
 
 let transitioningToSplat = false;
+let activePortalCameraOffsetZ: number | null = null;
+let activePortalCameraOffsetY: number | null = null;
 
 function updatePortalCheck() {
   if (!activeModel || !inScene || activePortals.length === 0 || transitioningToSplat || isInPortalDestination) return;
@@ -137,6 +161,8 @@ function updatePortalCheck() {
 function transitionToSplat(portal: PortalDef) {
   transitioningToSplat = true;
   isInPortalDestination = true; // block return immediately (even during load)
+  activePortalCameraOffsetZ = portal.targetCameraOffsetZ ?? null;
+  activePortalCameraOffsetY = portal.targetCameraOffsetY ?? null;
   backBtn.style.display = "none";
   backBtn.style.pointerEvents = "none";
   backBtn.style.visibility = "hidden";
@@ -146,7 +172,11 @@ function transitionToSplat(portal: PortalDef) {
   loadingOverlay.style.transition = "none";
   loadingOverlay.style.opacity = "1";
   const loadingText = loadingOverlay.querySelector("h2");
-  if (loadingText) loadingText.textContent = portal.targetTitle || "Entering...";
+  if (loadingText) loadingText.textContent = `${randomChapter()} — ${portal.targetTitle || "Entering..."}`;
+  if (portal.targetNarrativeText) {
+    narrativeTextEl.textContent = portal.targetNarrativeText;
+    narrativeTextEl.classList.add("visible");
+  }
 
   // Remove and dispose old room assets completely
   if (activeSplat) {
@@ -194,8 +224,11 @@ function transitionToSplat(portal: PortalDef) {
         }
         if (portal.targetModelPosition) {
           activeModel.position.set(...portal.targetModelPosition);
-          // Use explicit position (don't override Y with targetFloorY)
-        } else if (portal.targetFloorY != null) {
+        }
+        if (portal.targetModelRotation) {
+          activeModel.rotation.set(...portal.targetModelRotation);
+        }
+        if (!portal.targetModelPosition && portal.targetFloorY != null) {
           activeModel.position.y = portal.targetFloorY;
         }
       }
@@ -211,7 +244,15 @@ function transitionToSplat(portal: PortalDef) {
       const sceneScaleMult = portal.targetSceneModelScale ?? 1;
       if (portal.targetSceneModels?.length && harryHeight > 0) {
         activeSceneModels.length = 0;
-        portal.targetSceneModels.forEach((sm) => {
+        npcMixers.forEach((m) => m.stopAllAction());
+        npcMixers.length = 0;
+        activeNpcs.forEach((npc) => {
+          scene.remove(npc.bubbleGroup);
+          (npc.bubble.element as HTMLElement).remove();
+        });
+        activeNpcs.length = 0;
+
+        portal.targetSceneModels.forEach((sm: SceneModelDef) => {
           const isFbx = sm.url.toLowerCase().endsWith(".fbx");
           const loader = isFbx ? fbxLoader : gltfLoader;
           loader.load(
@@ -227,9 +268,8 @@ function transitionToSplat(portal: PortalDef) {
               model.position.set(-c.x, -box.min.y, -c.z);
               if (sm.position) {
                 const [px, py = 0, pz] = sm.position;
-                const floorY = portal.targetFloorY ?? -2.2; // tune per room: more negative = lower
+                const floorY = portal.targetFloorY ?? -2.2;
                 model.position.add(new THREE.Vector3(px, py + floorY, pz));
-                // Face center at our height only (no tilt) — lookAt(0,1,0) made them lie backwards
                 model.lookAt(0, model.position.y, 0);
               }
               if (sm.rotation) model.rotation.set(...sm.rotation);
@@ -241,6 +281,52 @@ function transitionToSplat(portal: PortalDef) {
               });
               scene.add(model);
               activeSceneModels.push(model);
+
+              const clips = isFbx
+                ? (result as THREE.Group).animations
+                : (result as { scene: THREE.Group; animations?: THREE.AnimationClip[] }).animations;
+              if (clips && clips.length > 0) {
+                const mixer = new THREE.AnimationMixer(model);
+                for (const clip of clips) {
+                  const action = mixer.clipAction(clip);
+                  action.setLoop(THREE.LoopRepeat, Infinity);
+                  action.play();
+                }
+                npcMixers.push(mixer);
+              }
+
+              if (sm.name) {
+                const bubbleDiv = document.createElement("div");
+                bubbleDiv.className = "npc-bubble";
+                bubbleDiv.innerHTML =
+                  `<span class="npc-name">${sm.name}</span>` +
+                  `<span class="npc-hint">Press E to talk</span>` +
+                  `<span class="npc-last-msg"></span>`;
+                bubbleDiv.addEventListener("click", () => {
+                  const info = activeNpcs.find((n) => n.name === sm.name);
+                  if (info) openNpcChat(info);
+                });
+
+                const label = new CSS2DObject(bubbleDiv);
+                const worldBox = new THREE.Box3().setFromObject(model);
+                const bubbleGroup = new THREE.Group();
+                bubbleGroup.position.set(
+                  model.position.x,
+                  worldBox.max.y + 0.4,
+                  model.position.z
+                );
+                bubbleGroup.add(label);
+                scene.add(bubbleGroup);
+
+                activeNpcs.push({
+                  name: sm.name,
+                  model,
+                  bubble: label,
+                  bubbleGroup,
+                  chatHistory: [],
+                  greeting: sm.greeting || "Hello there!",
+                });
+              }
             },
             undefined,
             () => {}
@@ -267,7 +353,9 @@ function transitionToSplat(portal: PortalDef) {
       setTimeout(() => {
         loadingOverlay.style.display = "none";
         loadingOverlay.style.transition = "none";
+        narrativeTextEl.classList.remove("visible");
       }, 700);
+      controlsHint.classList.add("visible");
     },
     onProgress: (e) => { if (e.lengthComputable && loadingText) loadingText.textContent = `${portal.targetTitle || "Loading"}… ${Math.round(100 * e.loaded / e.total)}%`; },
   });
@@ -395,12 +483,24 @@ function updateBookOpen(dt: number) {
   }
 }
 
+function randomChapter(): string {
+  return `Chapter ${Math.floor(Math.random() * 34) + 1}`;
+}
+
 function enterScene(def: BookDef) {
   header.style.display = "none";
   hint.style.display = "none";
   sceneInfo.style.display = "block";
   sceneTitleEl.textContent = def.sceneTitle;
   sceneSubtitleEl.textContent = def.sceneSubtitle;
+  currentBookDef = def;
+
+  const loadingText = loadingOverlay.querySelector("h2");
+  if (loadingText) loadingText.textContent = `${randomChapter()} — ${def.sceneTitle}`;
+  if (def.narrativeText) {
+    narrativeTextEl.textContent = def.narrativeText;
+    narrativeTextEl.classList.add("visible");
+  }
 
   libraryGroup.visible = false;
   scene.fog = null;
@@ -473,18 +573,26 @@ function enterScene(def: BookDef) {
           });
         }
 
-        controls.enabled = true;
-        controls.autoRotate = !def.modelUrl;
-        controls.autoRotateSpeed = 0.4;
-        controls.minDistance = 0.5;
-        controls.maxDistance = 50;
-        controls.minPolarAngle = 0;
-        controls.maxPolarAngle = Math.PI;
-        controls.enablePan = true;
-        // Start camera in front of character, then revolve to back
-        camera.position.set(0, 1.5, def.modelUrl ? 4 : 4); // start at +Z, intro orbits to -Z (back)
-        controls.target.set(0, 0.8, 0);
-        if (def.modelUrl) cameraIntroProgress = 0;
+        if (def.modelUrl) {
+          controls.enabled = false;
+          controls.autoRotate = false;
+          const offY = def.sceneCameraOffsetY ?? CAM_OFFSET.y;
+          const offZ = def.sceneCameraOffsetZ ?? CAM_OFFSET.z;
+          camera.position.set(0, offY, -offZ);
+          controls.target.set(0, CAM_LOOK_OFFSET.y, 0);
+          cameraIntroProgress = 1;
+        } else {
+          controls.enabled = true;
+          controls.autoRotate = true;
+          controls.autoRotateSpeed = 0.4;
+          controls.minDistance = 0.5;
+          controls.maxDistance = 50;
+          controls.minPolarAngle = 0;
+          controls.maxPolarAngle = Math.PI;
+          controls.enablePan = true;
+          camera.position.set(0, 1.5, 4);
+          controls.target.set(0, 0.8, 0);
+        }
 
         // Scene-info passes clicks through to canvas; only Back button captures clicks (avoids accidental return when orbiting)
         sceneInfo.style.pointerEvents = "none";
@@ -502,7 +610,9 @@ function enterScene(def: BookDef) {
         setTimeout(() => {
           loadingOverlay.style.display = "none";
           loadingOverlay.style.transition = "none";
+          narrativeTextEl.classList.remove("visible");
         }, 900);
+        if (def.modelUrl) controlsHint.classList.add("visible");
       },
     });
     scene.add(splat);
@@ -666,10 +776,23 @@ function resetToLibrary() {
     });
   });
   activeSceneModels.length = 0;
+  npcMixers.forEach((m) => m.stopAllAction());
+  npcMixers.length = 0;
+  activeNpcs.forEach((npc) => {
+    scene.remove(npc.bubbleGroup);
+    (npc.bubble.element as HTMLElement).remove();
+  });
+  activeNpcs.length = 0;
+  if (chatOpen) closeNpcChat();
+  chatTarget = null;
+  chatOpen = false;
+
   cameraIntroProgress = 1;
   inScene = false;
   transitioningToSplat = false;
   isInPortalDestination = false;
+  currentBookDef = null;
+  controlsHint.classList.remove("visible");
 
   loadingOverlay.style.display = "none";
   loadingOverlay.style.opacity = "0";
@@ -714,6 +837,166 @@ function resetToLibrary() {
   controls.target.set(0, 1.2, 0);
 }
 
+// ── NPC chat system ──
+function openNpcChat(npc: NpcInfo) {
+  chatTarget = npc;
+  chatOpen = true;
+  chatCharName.textContent = npc.name;
+  chatPanel.classList.add("open");
+  renderChatMessages(npc);
+
+  if (npc.chatHistory.length === 0) {
+    npc.chatHistory.push({ role: "assistant", content: npc.greeting });
+    renderChatMessages(npc);
+    updateNpcBubbleText(npc, npc.greeting);
+  }
+  setTimeout(() => chatInput.focus(), 100);
+}
+
+function closeNpcChat() {
+  chatOpen = false;
+  chatTarget = null;
+  chatPanel.classList.remove("open");
+  chatInput.blur();
+  renderer.domElement.focus();
+}
+
+function renderChatMessages(npc: NpcInfo) {
+  chatMessagesEl.innerHTML = "";
+  const sysDiv = document.createElement("div");
+  sysDiv.className = "chat-msg system";
+  sysDiv.textContent = `You approach ${npc.name}...`;
+  chatMessagesEl.appendChild(sysDiv);
+
+  for (const msg of npc.chatHistory) {
+    const div = document.createElement("div");
+    div.className = `chat-msg ${msg.role}`;
+    div.textContent = msg.content;
+    chatMessagesEl.appendChild(div);
+  }
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+}
+
+const DUMMY_REPLIES: Record<string, string[]> = {
+  "Hermione Granger": [
+    "Honestly, if you'd just read Hogwarts: A History, you'd already know the answer.",
+    "I've been practising the Patronus Charm all week. It's really quite advanced magic, you know.",
+    "The library closes at eight — we should hurry if we want to look up that potion.",
+    "Professor McGonagall said my Transfiguration essay was the best she'd seen in years!",
+    "Don't you think it's strange that Moody keeps watching Harry during lessons?",
+    "I wish Ron would take his studies more seriously. N.E.W.T.s are only two years away!",
+  ],
+  "Ron Weasley": [
+    "Blimey, I'm starving. Reckon the house-elves have any treacle tart left?",
+    "Did you see the Chudley Cannons match last weekend? Absolute disaster, mate.",
+    "Mum sent me a Howler last week — the whole common room heard it. Brilliant.",
+    "I'll tell you what, wizard's chess is the one thing I'll always beat Hermione at.",
+    "Fred and George have been testing their new sweets on first years again. Mental, those two.",
+    "Honestly, I don't fancy our chances in the Tournament. Have you seen Krum fly?",
+  ],
+  "Albus Dumbledore": [
+    "It does not do to dwell on dreams and forget to live, Harry.",
+    "Happiness can be found even in the darkest of times, if one only remembers to turn on the light.",
+    "Ah, I see you've discovered the Room of Requirement. Curious how it always knows what one needs.",
+    "I must confess a fondness for lemon drops. Would you care for one?",
+    "The truth — it is a beautiful and terrible thing, and should therefore be treated with great caution.",
+    "Nitwit! Blubber! Oddment! Tweak! ...Forgive me, I do enjoy a good nonsense now and then.",
+  ],
+};
+
+async function sendChatMessage(text: string) {
+  if (!chatTarget || !text.trim()) return;
+  const npc = chatTarget;
+  npc.chatHistory.push({ role: "user", content: text.trim() });
+  renderChatMessages(npc);
+  chatInput.value = "";
+
+  const typingDiv = document.createElement("div");
+  typingDiv.className = "chat-msg assistant typing";
+  typingDiv.textContent = "...";
+  chatMessagesEl.appendChild(typingDiv);
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+
+  await new Promise((r) => setTimeout(r, 600 + Math.random() * 800));
+  typingDiv.remove();
+
+  const pool = DUMMY_REPLIES[npc.name] || ["*nods thoughtfully*"];
+  const reply = pool[Math.floor(Math.random() * pool.length)];
+  npc.chatHistory.push({ role: "assistant", content: reply });
+  renderChatMessages(npc);
+  updateNpcBubbleText(npc, reply);
+}
+
+function updateNpcBubbleText(npc: NpcInfo, text: string) {
+  const el = npc.bubble.element as HTMLElement;
+  const lastMsgEl = el.querySelector(".npc-last-msg") as HTMLElement;
+  if (lastMsgEl) {
+    const snippet = text.length > 60 ? text.slice(0, 57) + "..." : text;
+    lastMsgEl.textContent = `"${snippet}"`;
+    el.classList.add("has-message");
+  }
+}
+
+function findNearestNpc(): NpcInfo | null {
+  if (!activeModel || activeNpcs.length === 0) return null;
+  const pos = activeModel.position;
+  let best: NpcInfo | null = null;
+  let bestDist = Infinity;
+  for (const npc of activeNpcs) {
+    const dx = pos.x - npc.bubbleGroup.position.x;
+    const dz = pos.z - npc.bubbleGroup.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = npc;
+    }
+  }
+  return bestDist < 5 ? best : null;
+}
+
+function updateNpcProximity() {
+  if (!activeModel || activeNpcs.length === 0) return;
+  const pos = activeModel.position;
+  for (const npc of activeNpcs) {
+    const dx = pos.x - npc.bubbleGroup.position.x;
+    const dz = pos.z - npc.bubbleGroup.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const el = npc.bubble.element as HTMLElement;
+    if (dist < 5) {
+      el.classList.add("nearby");
+    } else {
+      el.classList.remove("nearby");
+    }
+  }
+}
+
+chatSendBtn.addEventListener("click", () => {
+  sendChatMessage(chatInput.value);
+});
+chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    sendChatMessage(chatInput.value);
+  }
+  if (e.key === "Escape") {
+    closeNpcChat();
+  }
+  e.stopPropagation();
+});
+chatCloseBtn.addEventListener("click", closeNpcChat);
+
+window.addEventListener("keydown", (e) => {
+  const tag = (e.target as HTMLElement).tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+  if (e.key.toLowerCase() === "e" && inScene && !chatOpen) {
+    const nearest = findNearestNpc();
+    if (nearest) openNpcChat(nearest);
+  }
+  if (e.key === "Escape" && chatOpen) {
+    closeNpcChat();
+  }
+});
+
 backBtn.addEventListener("click", () => {
   if (isInPortalDestination) return;
   resetToLibrary();
@@ -751,18 +1034,30 @@ function animate() {
   ffMat.opacity = 0.5 + Math.sin(t * 1.8) * 0.2;
 
   if (activeAnimMixer) activeAnimMixer.update(dt);
+  for (const m of npcMixers) m.update(dt);
   updateCharacterMovement(dt, { activeModel, inScene, cameraIntroProgress, currentAction, camera });
   if (activeModel && inScene) {
     if (cameraIntroProgress < 1) {
       cameraIntroProgress = updateCameraIntro(dt, { camera, controls, cameraIntroProgress });
     } else {
-      updateThirdPersonCamera(dt, { activeModel, inScene, camera, controls, cameraIntroProgress });
+      const camZ = isInPortalDestination ? (activePortalCameraOffsetZ ?? undefined) : (currentBookDef?.sceneCameraOffsetZ);
+      const camY = isInPortalDestination ? (activePortalCameraOffsetY ?? undefined) : (currentBookDef?.sceneCameraOffsetY);
+      updateThirdPersonCamera(dt, {
+        activeModel,
+        inScene,
+        camera,
+        controls,
+        cameraIntroProgress,
+        cameraOffsetZ: camZ,
+        cameraOffsetY: camY,
+      });
     }
     updatePortalCheck();
   }
+  if (isInPortalDestination) updateNpcProximity();
   updateBookOpen(dt);
   if (!inScene) checkHover();
-  controls.update();
+  if (controls.enabled) controls.update();
   spark.render(scene, camera);
   css2DRenderer.render(scene, camera);
 }

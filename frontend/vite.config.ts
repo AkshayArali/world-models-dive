@@ -8,7 +8,17 @@ export default defineConfig({
     alias: { three: threePkg },
     dedupe: ["three"],
   },
-  server: { host: "0.0.0.0", port: 8081, open: true },
+  server: {
+    host: "0.0.0.0",
+    port: 8081,
+    open: true,
+    proxy: {
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     outDir: "dist",
     target: "esnext",

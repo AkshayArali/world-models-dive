@@ -5,23 +5,32 @@ export interface AnimDef {
   url: string;
 }
 
+export interface SceneModelDef {
+  url: string;
+  name?: string;
+  greeting?: string;
+  scale?: number;
+  position?: [number, number, number];
+  rotation?: [number, number, number];
+}
+
 export interface PortalDef {
   position: [number, number, number];
   radius: number;
   targetSplatUrl: string;
   targetTitle?: string;
   targetSubtitle?: string;
+  targetNarrativeText?: string;
   bubbleText?: string;
   targetModelScale?: number;
   targetModelPosition?: [number, number, number];
+  targetModelRotation?: [number, number, number];
   targetSplatScale?: number;
   targetFloorY?: number;
   targetSceneModelScale?: number;
-  targetSceneModels?: {
-    url: string;
-    position?: [number, number, number];
-    rotation?: [number, number, number];
-  }[];
+  targetCameraOffsetZ?: number;
+  targetCameraOffsetY?: number;
+  targetSceneModels?: SceneModelDef[];
 }
 
 export interface BookDef {
@@ -32,20 +41,18 @@ export interface BookDef {
   splatUrl: string;
   sceneTitle: string;
   sceneSubtitle: string;
+  narrativeText?: string;
   locked?: boolean;
   splatQuality?: "low" | "medium" | "high";
   modelUrl?: string;
   modelScale?: number;
   modelPosition?: [number, number, number];
   modelRotation?: [number, number, number];
+  sceneCameraOffsetY?: number;
+  sceneCameraOffsetZ?: number;
   extraAnims?: AnimDef[];
   portals?: PortalDef[];
-  sceneModels?: {
-    url: string;
-    scale?: number;
-    position?: [number, number, number];
-    rotation?: [number, number, number];
-  }[];
+  sceneModels?: SceneModelDef[];
 }
 
 export interface PagePivot {
