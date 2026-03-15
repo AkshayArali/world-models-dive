@@ -106,14 +106,34 @@
         font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 4px;
       }
       #back-btn {
-        margin-top: 12px; padding: 6px 20px;
-        background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+        position: fixed; top: 24px; right: 24px; left: auto;
+        padding: 8px 20px;
+        background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15);
         color: #fff; border-radius: 4px; cursor: pointer;
         font-family: 'Inter', sans-serif;
         font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
         transition: background 0.2s;
+        z-index: 20;
       }
       #back-btn:hover { background: rgba(255,255,255,0.15); }
+
+      /* Portal text bubbles (above each portal in 3D) */
+      .portal-bubble {
+        font-family: 'Inter', sans-serif;
+        font-size: 13px;
+        font-weight: 400;
+        letter-spacing: 0.5px;
+        color: rgba(255,255,255,0.95);
+        background: rgba(0,0,0,0.65);
+        padding: 8px 14px;
+        border-radius: 6px;
+        white-space: nowrap;
+        border: 1px solid rgba(255,255,255,0.12);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+        transform: translate(-50%, -100%);
+        user-select: none;
+      }
     </style>
   </head>
   <body>
@@ -136,7 +156,7 @@
     <div id="scene-info">
       <h2 id="scene-title"></h2>
       <p id="scene-subtitle"></p>
-      <button id="back-btn">← Back to Library</button>
+      <button id="back-btn" tabindex="-1">← Back to Library</button>
     </div>
 
     <script type="module" src="/src/index.ts"></script>

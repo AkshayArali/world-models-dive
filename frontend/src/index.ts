@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { SplatMesh, SparkRenderer } from "@sparkjsdev/spark";
@@ -12,6 +13,14 @@ interface PortalDef {
   targetSplatUrl: string;
   targetTitle?: string;
   targetSubtitle?: string;
+  /** Optional text for bubble above portal (defaults to targetTitle); ready for LLM integration */
+  bubbleText?: string;
+  /** Scale factor for character when entering this scene only (e.g. 2 = 2x bigger) */
+  targetModelScale?: number;
+  /** Position [x, y, z] to place character when entering this scene (e.g. center) */
+  targetModelPosition?: [number, number, number];
+  /** Scale factor for the splat scene when entering (e.g. 2 = 200% bigger) */
+  targetSplatScale?: number;
 }
 interface BookDef {
   id: string;
@@ -30,6 +39,8 @@ interface BookDef {
   modelRotation?: [number, number, number];
   extraAnims?: AnimDef[];
   portals?: PortalDef[];
+  /** Additional static scene models (e.g. lunar lander on moon) */
+  sceneModels?: { url: string; scale?: number; position?: [number, number, number]; rotation?: [number, number, number] }[];
 }
 
 const BOOKS: BookDef[] = [
@@ -54,13 +65,17 @@ const BOOKS: BookDef[] = [
     splatQuality: "low",
     modelUrl: "./models/harry.fbx",
     modelScale: 0.25,
+    modelRotation: [0, Math.PI, 0], // face backward (into scene)
     portals: [
       {
         position: [3, 0, 2],
-        radius: 1.2,
+        radius: 1.5, // slightly larger so portal is easier to enter
         targetSplatUrl: "./models/GryffindorCommonRoom.spz",
         targetTitle: "Gryffindor Common Room",
         targetSubtitle: "The cozy fireside haven",
+        targetModelScale: 8, // Harry much bigger in Gryffindor scene only
+        targetModelPosition: [0, 0, 0], // Harry in the middle
+        targetSplatScale: 6, // Gryffindor Common Room much bigger
       },
     ],
   },
@@ -73,9 +88,13 @@ const BOOKS: BookDef[] = [
     sceneTitle: "Apollo 11",
     sceneSubtitle: "The First Moon Landing",
     locked: false,
+    splatQuality: "low", // reduce splat load for smooth moon performance
     modelUrl: "./models/astronaut_run.fbx",
     modelScale: 0.3,
-    modelRotation: [0, Math.PI, 0],
+    modelRotation: [0, Math.PI, 0], // face backward (into scene) so W moves forward
+    sceneModels: [
+      { url: "./models/lander.fbx", scale: 0.04, position: [5, 0.5, 8], rotation: [0, Math.PI / 4, 0] },
+    ],
   },
 ];
 
@@ -101,6 +120,16 @@ document.body.appendChild(renderer.domElement);
 renderer.domElement.setAttribute("tabindex", "0");
 renderer.domElement.style.outline = "none";
 
+// ── CSS2D for portal labels (text bubbles in 3D space) ──
+const css2DRenderer = new CSS2DRenderer();
+css2DRenderer.setSize(window.innerWidth, window.innerHeight);
+css2DRenderer.domElement.style.position = "absolute";
+css2DRenderer.domElement.style.top = "0";
+css2DRenderer.domElement.style.left = "0";
+css2DRenderer.domElement.style.zIndex = "5"; // above canvas, below UI (10+)
+css2DRenderer.domElement.style.pointerEvents = "none";
+document.body.appendChild(css2DRenderer.domElement);
+
 // ── Scene ──
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x2a3a52, 0.018);
@@ -119,7 +148,7 @@ function applySplatQuality(q: "low" | "medium" | "high" | undefined) {
   renderer.shadowMap.enabled = false; // splats don't use shadows
   if (q === "low") {
     spark.enableLod = true;
-    spark.lodSplatCount = 100000;
+    spark.lodSplatCount = 80000;
     spark.lodSplatScale = 0.5;
     renderer.setPixelRatio(1);
   } else if (q === "medium") {
@@ -376,10 +405,11 @@ function createBook(def: BookDef, index: number, total: number): BookMesh {
   coverPivot.add(frontCover);
   root.add(coverPivot);
 
-  // Position in arc
-  const spread = 3.0;
-  const angleStep = (Math.PI * 0.35) / Math.max(total - 1, 1);
-  const startAngle = -Math.PI * 0.175;
+  // Position in arc — modest spread
+  const spread = 3.5;
+  const arcRadians = Math.PI * 0.4;
+  const angleStep = arcRadians / Math.max(total - 1, 1);
+  const startAngle = -arcRadians / 2;
   const angle = startAngle + index * angleStep;
 
   root.position.set(Math.sin(angle) * spread, H / 2 + 0.12, -Math.cos(angle) * spread + 2);
@@ -439,9 +469,11 @@ let activeAnimMixer: THREE.AnimationMixer | null = null;
 let activeAnimActions: Map<string, THREE.AnimationAction> = new Map();
 let currentAction: THREE.AnimationAction | null = null;
 const activeSceneLights: THREE.Object3D[] = [];
+const activeSceneModels: THREE.Object3D[] = [];
 const activePortals: { def: PortalDef; mesh: THREE.Group }[] = [];
 let inScene = false;
 let currentBookDef: BookDef | null = null;
+let isInPortalDestination = false; // true when in Gryffindor — cannot go back to previous chapter
 const gltfLoader = new GLTFLoader();
 const fbxLoader = new FBXLoader();
 
@@ -471,6 +503,16 @@ function createPortalMesh(portal: PortalDef): THREE.Group {
   );
   inner.rotation.x = -Math.PI / 2;
   group.add(inner);
+
+  // Text bubble above portal (clean, minimal; ready for LLM content)
+  const bubbleText = portal.bubbleText ?? portal.targetTitle ?? "Enter";
+  const bubbleEl = document.createElement("div");
+  bubbleEl.className = "portal-bubble";
+  bubbleEl.textContent = bubbleText;
+  const bubbleLabel = new CSS2DObject(bubbleEl);
+  bubbleLabel.position.set(0, portal.radius + 1.0, 0);
+  group.add(bubbleLabel);
+
   return group;
 }
 
@@ -497,8 +539,8 @@ window.addEventListener("keydown", (e) => {
   if (e.key === " ") keys["space"] = true;
   if (e.shiftKey) keys["shift"] = true;
 
-  // When in scene with character, prevent browser defaults (Space=scroll, etc.)
-  if (inScene && activeModel && ["w", "a", "s", "d", "e", "q", " "].includes(k)) {
+  // When in scene with character, prevent browser defaults (Space=scroll, Enter=activate focused button)
+  if (inScene && activeModel && ["w", "a", "s", "d", "e", "q", " ", "enter"].includes(k)) {
     e.preventDefault();
   }
   if (!inScene) return;
@@ -528,6 +570,7 @@ function updateCharacterMovement(dt: number) {
   if (!activeModel || !inScene) return;
   if (cameraIntroProgress < 1) return; // no movement until camera revolved to back
 
+  // W=forward, S=backward, A=left, D=right | E/Space=up, Q=down
   const moveDir = new THREE.Vector3();
   if (keys["w"]) moveDir.z -= 1;
   if (keys["s"]) moveDir.z += 1;
@@ -558,6 +601,7 @@ function updateCharacterMovement(dt: number) {
   if (moveDir.lengthSq() === 0) return;
   moveDir.normalize();
 
+  // Camera-relative: W=into scene (forward), S=back, A=left, D=right
   const camForward = new THREE.Vector3();
   camera.getWorldDirection(camForward);
   camForward.y = 0;
@@ -581,12 +625,13 @@ function updateCharacterMovement(dt: number) {
 let transitioningToSplat = false;
 
 function updatePortalCheck() {
-  if (!activeModel || !inScene || activePortals.length === 0 || transitioningToSplat) return;
+  if (!activeModel || !inScene || activePortals.length === 0 || transitioningToSplat || isInPortalDestination) return;
   const pos = activeModel.position;
   for (const { def } of activePortals) {
     const dx = pos.x - def.position[0], dz = pos.z - def.position[2];
     const dist2D = Math.sqrt(dx * dx + dz * dz);
-    if (dist2D < def.radius && pos.y - def.position[1] < def.radius) {
+    // Use 2D distance only; Y check was too strict (portal at floor level)
+    if (dist2D < def.radius) {
       transitionToSplat(def);
       return;
     }
@@ -595,22 +640,42 @@ function updatePortalCheck() {
 
 function transitionToSplat(portal: PortalDef) {
   transitioningToSplat = true;
+  isInPortalDestination = true; // block return immediately (even during load)
+  backBtn.style.display = "none";
+  backBtn.style.pointerEvents = "none";
+  backBtn.style.visibility = "hidden";
+  sceneInfo.style.pointerEvents = "none";
+
   loadingOverlay.style.display = "flex";
   loadingOverlay.style.transition = "none";
   loadingOverlay.style.opacity = "1";
   const loadingText = loadingOverlay.querySelector("h2");
   if (loadingText) loadingText.textContent = portal.targetTitle || "Entering...";
 
+  // Remove and dispose old room assets completely
   if (activeSplat) {
     scene.remove(activeSplat);
     activeSplat.dispose();
     activeSplat = null;
   }
-  activePortals.forEach(({ mesh }) => scene.remove(mesh));
+  activePortals.forEach(({ mesh }) => {
+    scene.remove(mesh);
+    // Dispose portal geometries, materials, and clean up CSS2D labels
+    mesh.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry?.dispose();
+        if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+        else obj.material?.dispose();
+      }
+      if ("element" in obj && obj.element instanceof HTMLElement) {
+        obj.element.remove();
+      }
+    });
+  });
   activePortals.length = 0;
 
   // Apply low quality for portal destination (also a heavy splat)
-  spark.lodSplatCount = 100000;
+  spark.lodSplatCount = 80000;
   spark.lodSplatScale = 0.5;
   renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = false;
@@ -619,10 +684,35 @@ function transitionToSplat(portal: PortalDef) {
     url: portal.targetSplatUrl,
     maxSplats: 150000,
     onLoad: () => {
+      // Only add to scene after load — ensures prev room is fully gone, no overlap
+      scene.add(newSplat);
       activeSplat = newSplat;
       transitioningToSplat = false;
+      if (portal.targetSplatScale != null) {
+        const s = portal.targetSplatScale;
+        newSplat.scale.set(s, s, s);
+      }
+      if (activeModel) {
+        if (portal.targetModelScale != null) {
+          activeModel.scale.multiplyScalar(portal.targetModelScale);
+        }
+        if (portal.targetModelPosition) {
+          activeModel.position.set(...portal.targetModelPosition);
+        }
+      }
       if (portal.targetTitle) sceneTitleEl.textContent = portal.targetTitle;
       if (portal.targetSubtitle) sceneSubtitleEl.textContent = portal.targetSubtitle;
+      isInPortalDestination = true; // cannot go back to previous chapter
+      backBtn.style.display = "none";
+      backBtn.style.pointerEvents = "none";
+      backBtn.style.visibility = "hidden";
+      sceneInfo.style.pointerEvents = "none"; // entire panel non-interactive so nothing can trigger back
+      // Block browser Back button now that we're in the next chapter
+      history.pushState({ portalDestination: true }, "", location.href);
+      const popHandler = () => {
+        if (isInPortalDestination) history.pushState({ portalDestination: true }, "", location.href);
+      };
+      window.addEventListener("popstate", popHandler);
       loadingOverlay.style.transition = "opacity 0.6s ease";
       loadingOverlay.style.opacity = "0";
       setTimeout(() => {
@@ -632,7 +722,7 @@ function transitionToSplat(portal: PortalDef) {
     },
     onProgress: (e) => { if (e.lengthComputable && loadingText) loadingText.textContent = `${portal.targetTitle || "Loading"}… ${Math.round(100 * e.loaded / e.total)}%`; },
   });
-  scene.add(newSplat);
+  // Don't add to scene until loaded — prev room assets are fully removed during load
 }
 
 function updateCameraIntro(dt: number) {
@@ -837,7 +927,7 @@ function enterScene(def: BookDef) {
   if (def.splatUrl) {
     const q = def.splatQuality ?? "high";
     if (q === "low") {
-      spark.lodSplatCount = 100000;
+      spark.lodSplatCount = 80000;  // fewer splats = less lag (moon, etc.)
       spark.lodSplatScale = 0.5;
       renderer.setPixelRatio(1);
       renderer.shadowMap.enabled = false;
@@ -855,10 +945,13 @@ function enterScene(def: BookDef) {
 
     const splat = new SplatMesh({
       url: def.splatUrl,
-      maxSplats: (def.splatQuality === "low") ? 150000 : undefined,
+      maxSplats: (def.splatQuality === "low") ? 120000 : undefined,
       onLoad: () => {
         activeSplat = splat;
         inScene = true;
+        // Pass clicks through to canvas; only Back button captures (when visible)
+        sceneInfo.style.pointerEvents = "none";
+        backBtn.style.pointerEvents = "auto";
 
         if (def.portals) {
           activePortals.length = 0;
@@ -866,6 +959,35 @@ function enterScene(def: BookDef) {
             const mesh = createPortalMesh(p);
             scene.add(mesh);
             activePortals.push({ def: p, mesh });
+          });
+        }
+
+        // Load additional static scene models (e.g. lunar lander on moon)
+        if (def.sceneModels) {
+          activeSceneModels.length = 0;
+          def.sceneModels.forEach((sm) => {
+            const isFbx = sm.url.toLowerCase().endsWith(".fbx");
+            const loader = isFbx ? fbxLoader : gltfLoader;
+            loader.load(
+              sm.url,
+              (result: THREE.Group | { scene: THREE.Group }) => {
+                const model = result instanceof THREE.Group ? result : (result as { scene: THREE.Group }).scene;
+                if (sm.scale != null) model.scale.setScalar(sm.scale);
+                if (sm.position) model.position.set(...sm.position);
+                if (sm.rotation) model.rotation.set(...sm.rotation);
+                // Disable shadows on scene models for better performance (moon/lander)
+                model.traverse((child) => {
+                  if (child instanceof THREE.Mesh) {
+                    child.castShadow = false;
+                    child.receiveShadow = false;
+                  }
+                });
+                scene.add(model);
+                activeSceneModels.push(model);
+              },
+              undefined,
+              () => {}
+            );
           });
         }
 
@@ -882,8 +1004,16 @@ function enterScene(def: BookDef) {
         controls.target.set(0, 0.8, 0);
         if (def.modelUrl) cameraIntroProgress = 0;
 
+        // Scene-info passes clicks through to canvas; only Back button captures clicks (avoids accidental return when orbiting)
+        sceneInfo.style.pointerEvents = "none";
+        backBtn.style.pointerEvents = "auto";
+
         // Focus canvas so WASD works (click canvas if keys don't register)
         renderer.domElement.focus();
+
+        // Let clicks pass through to canvas; only Back button captures (avoids accidental returns when orbiting)
+        sceneInfo.style.pointerEvents = "none";
+        backBtn.style.pointerEvents = "auto";
 
         loadingOverlay.style.transition = "opacity 0.8s ease";
         loadingOverlay.style.opacity = "0";
@@ -1001,6 +1131,7 @@ function enterScene(def: BookDef) {
 }
 
 function resetToLibrary() {
+  if (isInPortalDestination) return; // cannot go back from inner chapter
   if (activeSplat) {
     scene.remove(activeSplat);
     activeSplat.dispose();
@@ -1019,16 +1150,53 @@ function resetToLibrary() {
   cameraIntroProgress = 1;
   activeSceneLights.forEach((l) => scene.remove(l));
   activeSceneLights.length = 0;
-  activePortals.forEach(({ mesh }) => scene.remove(mesh));
+  activeSceneModels.forEach((obj) => {
+    scene.remove(obj);
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry?.dispose();
+        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+        else child.material?.dispose();
+      }
+    });
+  });
+  activeSceneModels.length = 0;
+  activePortals.forEach(({ mesh }) => {
+    scene.remove(mesh);
+    mesh.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry?.dispose();
+        if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+        else obj.material?.dispose();
+      }
+      if ("element" in obj && obj.element instanceof HTMLElement) obj.element.remove();
+    });
+  });
   activePortals.length = 0;
+  activeSceneModels.forEach((obj) => {
+    scene.remove(obj);
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry?.dispose();
+        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+        else child.material?.dispose();
+      }
+    });
+  });
+  activeSceneModels.length = 0;
   cameraIntroProgress = 1;
   inScene = false;
   transitioningToSplat = false;
+  isInPortalDestination = false;
 
   loadingOverlay.style.display = "none";
   loadingOverlay.style.opacity = "0";
   loadingOverlay.style.transition = "none";
   sceneInfo.style.display = "none";
+  backBtn.style.display = "";
+  backBtn.style.pointerEvents = "";
+  backBtn.style.visibility = "";
+  sceneInfo.style.pointerEvents = ""; // restore for next book
   header.style.display = "block";
   header.style.opacity = "1";
   hint.style.display = "block";
@@ -1064,7 +1232,10 @@ function resetToLibrary() {
   controls.target.set(0, 1.2, 0);
 }
 
-backBtn.addEventListener("click", resetToLibrary);
+backBtn.addEventListener("click", () => {
+  if (isInPortalDestination) return;
+  resetToLibrary();
+});
 
 // ── Easing helpers ──
 function easeOutCubic(t: number) { return 1 - Math.pow(1 - t, 3); }
@@ -1116,6 +1287,7 @@ function animate() {
   if (!inScene) checkHover();
   controls.update();
   spark.render(scene, camera);
+  css2DRenderer.render(scene, camera);
 }
 
 // ── Resize ──
@@ -1123,6 +1295,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  css2DRenderer.setSize(window.innerWidth, window.innerHeight);
 });
 
 // ── Start ──
