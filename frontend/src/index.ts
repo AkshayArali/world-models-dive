@@ -194,16 +194,21 @@ function transitionToSplat(portal: PortalDef) {
         }
         if (portal.targetModelPosition) {
           activeModel.position.set(...portal.targetModelPosition);
+          // Use explicit position (don't override Y with targetFloorY)
+        } else if (portal.targetFloorY != null) {
+          activeModel.position.y = portal.targetFloorY;
         }
       }
 
-      // Load Hermione, Ron, Dumbledore in common room — same scale as Harry
-      const playerScale = (currentBookDef?.modelScale ?? 0.25) * (portal.targetModelScale ?? 1);
+      // Load Hermione, Ron, Dumbledore in common room — match Harry's size exactly
+      // Use Harry's actual world-space height (after portal scaling) to scale NPCs to match
       let harryHeight = 0;
       if (activeModel) {
+        activeModel.updateMatrixWorld(true);
         const harryBox = new THREE.Box3().setFromObject(activeModel);
         harryHeight = harryBox.max.y - harryBox.min.y;
       }
+      const sceneScaleMult = portal.targetSceneModelScale ?? 1;
       if (portal.targetSceneModels?.length && harryHeight > 0) {
         activeSceneModels.length = 0;
         portal.targetSceneModels.forEach((sm) => {
@@ -215,9 +220,8 @@ function transitionToSplat(portal: PortalDef) {
               const model = isFbx ? (result as THREE.Group) : (result as { scene: THREE.Group }).scene;
               const box = new THREE.Box3().setFromObject(model);
               const npcHeight = box.max.y - box.min.y;
-              const heightScale = npcHeight > 0 ? harryHeight / npcHeight : 1;
-              const sceneScale = portal.targetSceneModelScale ?? portal.targetModelScale ?? 1;
-              model.scale.setScalar(heightScale * sceneScale);
+              const scale = (harryHeight / Math.max(npcHeight, 0.001)) * sceneScaleMult;
+              model.scale.setScalar(scale);
               box.setFromObject(model);
               const c = box.getCenter(new THREE.Vector3());
               model.position.set(-c.x, -box.min.y, -c.z);
