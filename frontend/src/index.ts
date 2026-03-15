@@ -6,6 +6,13 @@ import { SplatMesh, SparkRenderer } from "@sparkjsdev/spark";
 
 // ── Book catalog ──
 interface AnimDef { name: string; url: string; }
+interface PortalDef {
+  position: [number, number, number];
+  radius: number;
+  targetSplatUrl: string;
+  targetTitle?: string;
+  targetSubtitle?: string;
+}
 interface BookDef {
   id: string;
   title: string;
@@ -15,11 +22,14 @@ interface BookDef {
   sceneTitle: string;
   sceneSubtitle: string;
   locked?: boolean;
+  /** "low" = fewer splats rendered, better FPS for heavy scenes */
+  splatQuality?: "low" | "medium" | "high";
   modelUrl?: string;
   modelScale?: number;
   modelPosition?: [number, number, number];
   modelRotation?: [number, number, number];
   extraAnims?: AnimDef[];
+  portals?: PortalDef[];
 }
 
 const BOOKS: BookDef[] = [
@@ -37,10 +47,22 @@ const BOOKS: BookDef[] = [
     title: "Harry Potter",
     author: "J.K. Rowling",
     coverUrl: "./books/gobletoffire.jpg",
-    splatUrl: "./splats/sensai.spz",
+    splatUrl: "./models/HogwartsGreatHall.spz",
     sceneTitle: "The Goblet of Fire",
     sceneSubtitle: "Hogwarts — The Triwizard Tournament",
     locked: false,
+    splatQuality: "low",
+    modelUrl: "./models/harry.fbx",
+    modelScale: 0.25,
+    portals: [
+      {
+        position: [3, 0, 2],
+        radius: 1.2,
+        targetSplatUrl: "./models/GryffindorCommonRoom.spz",
+        targetTitle: "Gryffindor Common Room",
+        targetSubtitle: "The cozy fireside haven",
+      },
+    ],
   },
   {
     id: "apollo",
@@ -51,11 +73,9 @@ const BOOKS: BookDef[] = [
     sceneTitle: "Apollo 11",
     sceneSubtitle: "The First Moon Landing",
     locked: false,
-    modelUrl: "./models/astronaut.fbx",
+    modelUrl: "./models/astronaut_run.fbx",
     modelScale: 0.3,
-    extraAnims: [
-      { name: "run", url: "./models/astronaut_run.fbx" },
-    ],
+    modelRotation: [0, Math.PI, 0],
   },
 ];
 
@@ -69,8 +89,8 @@ const sceneTitleEl = document.getElementById("scene-title")!;
 const sceneSubtitleEl = document.getElementById("scene-subtitle")!;
 const backBtn = document.getElementById("back-btn")!;
 
-// ── Renderer ──
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// ── Renderer ── (antialias: false = better perf for splats, no visual benefit)
+const renderer = new THREE.WebGLRenderer({ antialias: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -78,13 +98,50 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 2.2;
 document.body.appendChild(renderer.domElement);
+renderer.domElement.setAttribute("tabindex", "0");
+renderer.domElement.style.outline = "none";
 
 // ── Scene ──
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x2a3a52, 0.018);
 
-const spark = new SparkRenderer({ renderer });
+const spark = new SparkRenderer({
+  renderer,
+  enableLod: true,
+  lodSplatCount: 800000,
+  lodSplatScale: 1.0,
+});
 scene.add(spark);
+
+const DEFAULT_PIXEL_RATIO = Math.min(window.devicePixelRatio, 2);
+
+function applySplatQuality(q: "low" | "medium" | "high" | undefined) {
+  renderer.shadowMap.enabled = false; // splats don't use shadows
+  if (q === "low") {
+    spark.enableLod = true;
+    spark.lodSplatCount = 100000;
+    spark.lodSplatScale = 0.5;
+    renderer.setPixelRatio(1);
+  } else if (q === "medium") {
+    spark.enableLod = true;
+    spark.lodSplatCount = 400000;
+    spark.lodSplatScale = 0.8;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  } else {
+    spark.enableLod = true;
+    spark.lodSplatCount = 800000;
+    spark.lodSplatScale = 1.0;
+    renderer.setPixelRatio(DEFAULT_PIXEL_RATIO);
+  }
+}
+
+function restoreSplatQuality() {
+  spark.enableLod = true;
+  spark.lodSplatCount = 800000;
+  spark.lodSplatScale = 1.0;
+  renderer.setPixelRatio(DEFAULT_PIXEL_RATIO);
+  renderer.shadowMap.enabled = true;
+}
 
 // ── Camera ──
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
@@ -153,8 +210,8 @@ libraryGroup.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
   color: 0xffffff, size: 0.18, sizeAttenuation: true, transparent: true, opacity: 0.9,
 })));
 
-// ── Ground ──
-const groundGeo = new THREE.PlaneGeometry(120, 120, 128, 128);
+// ── Ground ── (64×64 = fewer vertices, faster)
+const groundGeo = new THREE.PlaneGeometry(120, 120, 64, 64);
 groundGeo.rotateX(-Math.PI / 2);
 const posAttr = groundGeo.getAttribute("position");
 for (let i = 0; i < posAttr.count; i++) {
@@ -382,9 +439,40 @@ let activeAnimMixer: THREE.AnimationMixer | null = null;
 let activeAnimActions: Map<string, THREE.AnimationAction> = new Map();
 let currentAction: THREE.AnimationAction | null = null;
 const activeSceneLights: THREE.Object3D[] = [];
+const activePortals: { def: PortalDef; mesh: THREE.Group }[] = [];
 let inScene = false;
+let currentBookDef: BookDef | null = null;
 const gltfLoader = new GLTFLoader();
 const fbxLoader = new FBXLoader();
+
+function createPortalMesh(portal: PortalDef): THREE.Group {
+  const group = new THREE.Group();
+  group.position.set(...portal.position);
+  // Simplified geometry for performance (fewer segments)
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(portal.radius, 0.06, 8, 16),
+    new THREE.MeshBasicMaterial({
+      color: 0x4499ff,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+    }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  group.add(ring);
+  const inner = new THREE.Mesh(
+    new THREE.RingGeometry(portal.radius * 0.4, portal.radius * 0.9, 16),
+    new THREE.MeshBasicMaterial({
+      color: 0x88ccff,
+      transparent: true,
+      opacity: 0.4,
+      side: THREE.DoubleSide,
+    }),
+  );
+  inner.rotation.x = -Math.PI / 2;
+  group.add(inner);
+  return group;
+}
 
 // ── Character controls ──
 const keys: Record<string, boolean> = {};
@@ -394,13 +482,25 @@ const TURN_SPEED = 6.0;
 const CAM_OFFSET = new THREE.Vector3(0, 1.4, 3.0);
 const CAM_LOOK_OFFSET = new THREE.Vector3(0, 0.8, 0);
 const DEFAULT_FOV = 50;
+const CAMERA_INTRO_DURATION = 0.8; // fast revolve from front to back
 let modelSpawnPos = new THREE.Vector3();
 let modelSpawnRot = 0;
+let cameraIntroProgress = 1; // 1 = done, 0 = starting (camera in front)
+
+// Ensure canvas can receive focus for WASD
+renderer.domElement.setAttribute("tabindex", "0");
+renderer.domElement.style.outline = "none";
 
 window.addEventListener("keydown", (e) => {
-  keys[e.key.toLowerCase()] = true;
+  const k = e.key.toLowerCase();
+  keys[k] = true;
   if (e.key === " ") keys["space"] = true;
   if (e.shiftKey) keys["shift"] = true;
+
+  // When in scene with character, prevent browser defaults (Space=scroll, etc.)
+  if (inScene && activeModel && ["w", "a", "s", "d", "e", "q", " "].includes(k)) {
+    e.preventDefault();
+  }
   if (!inScene) return;
 
   if (e.key === "[") {
@@ -426,6 +526,7 @@ window.addEventListener("keyup", (e) => {
 
 function updateCharacterMovement(dt: number) {
   if (!activeModel || !inScene) return;
+  if (cameraIntroProgress < 1) return; // no movement until camera revolved to back
 
   const moveDir = new THREE.Vector3();
   if (keys["w"]) moveDir.z -= 1;
@@ -439,9 +540,15 @@ function updateCharacterMovement(dt: number) {
   const isMoving = moveDir.lengthSq() > 0 || vertDir !== 0;
 
   if (currentAction) {
+    const wasPaused = currentAction.paused;
     currentAction.paused = !isMoving;
-    if (isMoving && sprinting) currentAction.timeScale = 2.0;
-    else currentAction.timeScale = 1.0;
+    if (isMoving) {
+      if (wasPaused) currentAction.play();
+      currentAction.timeScale = sprinting ? 2.0 : 1.0;
+    } else {
+      currentAction.timeScale = 1.0;
+      if (!wasPaused) currentAction.reset(); // return to standing pose
+    }
   }
 
   if (vertDir !== 0) {
@@ -471,8 +578,77 @@ function updateCharacterMovement(dt: number) {
   activeModel.rotation.y += angleDiff * Math.min(1, TURN_SPEED * dt);
 }
 
+let transitioningToSplat = false;
+
+function updatePortalCheck() {
+  if (!activeModel || !inScene || activePortals.length === 0 || transitioningToSplat) return;
+  const pos = activeModel.position;
+  for (const { def } of activePortals) {
+    const dx = pos.x - def.position[0], dz = pos.z - def.position[2];
+    const dist2D = Math.sqrt(dx * dx + dz * dz);
+    if (dist2D < def.radius && pos.y - def.position[1] < def.radius) {
+      transitionToSplat(def);
+      return;
+    }
+  }
+}
+
+function transitionToSplat(portal: PortalDef) {
+  transitioningToSplat = true;
+  loadingOverlay.style.display = "flex";
+  loadingOverlay.style.transition = "none";
+  loadingOverlay.style.opacity = "1";
+  const loadingText = loadingOverlay.querySelector("h2");
+  if (loadingText) loadingText.textContent = portal.targetTitle || "Entering...";
+
+  if (activeSplat) {
+    scene.remove(activeSplat);
+    activeSplat.dispose();
+    activeSplat = null;
+  }
+  activePortals.forEach(({ mesh }) => scene.remove(mesh));
+  activePortals.length = 0;
+
+  // Apply low quality for portal destination (also a heavy splat)
+  spark.lodSplatCount = 100000;
+  spark.lodSplatScale = 0.5;
+  renderer.setPixelRatio(1);
+  renderer.shadowMap.enabled = false;
+
+  const newSplat = new SplatMesh({
+    url: portal.targetSplatUrl,
+    maxSplats: 150000,
+    onLoad: () => {
+      activeSplat = newSplat;
+      transitioningToSplat = false;
+      if (portal.targetTitle) sceneTitleEl.textContent = portal.targetTitle;
+      if (portal.targetSubtitle) sceneSubtitleEl.textContent = portal.targetSubtitle;
+      loadingOverlay.style.transition = "opacity 0.6s ease";
+      loadingOverlay.style.opacity = "0";
+      setTimeout(() => {
+        loadingOverlay.style.display = "none";
+        loadingOverlay.style.transition = "none";
+      }, 700);
+    },
+    onProgress: (e) => { if (e.lengthComputable && loadingText) loadingText.textContent = `${portal.targetTitle || "Loading"}… ${Math.round(100 * e.loaded / e.total)}%`; },
+  });
+  scene.add(newSplat);
+}
+
+function updateCameraIntro(dt: number) {
+  if (cameraIntroProgress >= 1) return;
+  cameraIntroProgress = Math.min(1, cameraIntroProgress + dt / CAMERA_INTRO_DURATION);
+  const t = cameraIntroProgress;
+  const eased = t * t * (3 - 2 * t); // smoothstep for smooth revolve
+  const angle = eased * Math.PI; // start 0, end PI — orbit from +Z to -Z
+  const radius = 4;
+  camera.position.set(radius * Math.sin(angle), 1.5, radius * Math.cos(angle));
+  controls.target.set(0, 0.8, 0);
+}
+
 function updateThirdPersonCamera(dt: number) {
   if (!activeModel || !inScene) return;
+  if (cameraIntroProgress < 1) return; // use camera intro until done
 
   const modelPos = activeModel.position;
   const behind = new THREE.Vector3(0, 0, 1)
@@ -659,22 +835,55 @@ function enterScene(def: BookDef) {
   scene.background = new THREE.Color(0x000000);
 
   if (def.splatUrl) {
+    const q = def.splatQuality ?? "high";
+    if (q === "low") {
+      spark.lodSplatCount = 100000;
+      spark.lodSplatScale = 0.5;
+      renderer.setPixelRatio(1);
+      renderer.shadowMap.enabled = false;
+    } else if (q === "medium") {
+      spark.lodSplatCount = 500000;
+      spark.lodSplatScale = 0.8;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      renderer.shadowMap.enabled = false;
+    } else {
+      spark.lodSplatCount = 800000;
+      spark.lodSplatScale = 1.0;
+      renderer.setPixelRatio(DEFAULT_PIXEL_RATIO);
+      renderer.shadowMap.enabled = true;
+    }
+
     const splat = new SplatMesh({
       url: def.splatUrl,
+      maxSplats: (def.splatQuality === "low") ? 150000 : undefined,
       onLoad: () => {
         activeSplat = splat;
         inScene = true;
 
+        if (def.portals) {
+          activePortals.length = 0;
+          def.portals.forEach((p) => {
+            const mesh = createPortalMesh(p);
+            scene.add(mesh);
+            activePortals.push({ def: p, mesh });
+          });
+        }
+
         controls.enabled = true;
-        controls.autoRotate = true;
+        controls.autoRotate = !def.modelUrl;
         controls.autoRotateSpeed = 0.4;
         controls.minDistance = 0.5;
         controls.maxDistance = 50;
         controls.minPolarAngle = 0;
         controls.maxPolarAngle = Math.PI;
         controls.enablePan = true;
-        camera.position.set(0, 1.5, 4);
-        controls.target.set(0, 0, 0);
+        // Start camera in front of character, then revolve to back
+        camera.position.set(0, 1.5, def.modelUrl ? 4 : 4); // start at +Z, intro orbits to -Z (back)
+        controls.target.set(0, 0.8, 0);
+        if (def.modelUrl) cameraIntroProgress = 0;
+
+        // Focus canvas so WASD works (click canvas if keys don't register)
+        renderer.domElement.focus();
 
         loadingOverlay.style.transition = "opacity 0.8s ease";
         loadingOverlay.style.opacity = "0";
@@ -694,47 +903,88 @@ function enterScene(def: BookDef) {
       scene.add(dirLight);
       activeSceneLights.push(amb, dirLight);
 
-      const setupModel = (model: THREE.Group) => {
-        const box = new THREE.Box3().setFromObject(model);
-        const maxDim = Math.max(...box.getSize(new THREE.Vector3()).toArray());
-        const s = (def.modelScale ?? 1.7) / maxDim;
-        model.scale.multiplyScalar(s);
+      const setupModel = (model: THREE.Group, baseClips: THREE.AnimationClip[] = []) => {
+        try {
+          const box = new THREE.Box3().setFromObject(model);
+          const maxDim = Math.max(...box.getSize(new THREE.Vector3()).toArray());
+          const s = (def.modelScale ?? 1.7) / Math.max(maxDim, 0.001);
+          model.scale.multiplyScalar(s);
 
-        box.setFromObject(model);
-        const c = box.getCenter(new THREE.Vector3());
-        model.position.set(-c.x, -box.min.y, -c.z);
+          box.setFromObject(model);
+          const c = box.getCenter(new THREE.Vector3());
+          model.position.set(-c.x, -box.min.y, -c.z);
+          if (def.modelRotation) model.rotation.set(...def.modelRotation);
 
-        scene.add(model);
+          scene.add(model);
         activeModel = model;
         modelSpawnPos.copy(model.position);
         modelSpawnRot = model.rotation.y;
 
-        activeAnimMixer = new THREE.AnimationMixer(model);
-        activeAnimActions.clear();
-        currentAction = null;
-        controls.autoRotate = false;
+        // Focus canvas when character loads so WASD works
+        renderer.domElement.focus();
 
-        // Load extra animation FBX files (e.g. run)
-        if (def.extraAnims && def.extraAnims.length > 0) {
-          def.extraAnims.forEach((ad) => {
-            fbxLoader.load(ad.url, (animFbx) => {
-              if (animFbx.animations.length > 0 && activeAnimMixer) {
-                const action = activeAnimMixer.clipAction(animFbx.animations[0]);
-                action.play();
-                action.paused = true;
-                activeAnimActions.set(ad.name, action);
-                if (!currentAction) currentAction = action;
-              }
+        activeAnimMixer = new THREE.AnimationMixer(model);
+          activeAnimActions.clear();
+          currentAction = null;
+          controls.autoRotate = false;
+
+          const walkKeywords = ["walk", "run", "jog", "locomotion", "move", "mixamo"];
+          for (const clip of baseClips) {
+            const name = clip.name?.toLowerCase() || "";
+            const isWalk = walkKeywords.some((kw) => name.includes(kw));
+            const action = activeAnimMixer.clipAction(clip);
+            action.setLoop(THREE.LoopRepeat, Infinity);
+            activeAnimActions.set(isWalk ? "run" : clip.name || "idle", action);
+            if (isWalk && !currentAction) {
+              action.play();
+              action.paused = true;
+              currentAction = action;
+            }
+          }
+          if (!currentAction && baseClips.length > 0) {
+            const first = activeAnimMixer.clipAction(baseClips[0]);
+            first.setLoop(THREE.LoopRepeat, Infinity);
+            first.play();
+            first.paused = true;
+            activeAnimActions.set("run", first);
+            currentAction = first;
+          }
+
+          if (def.extraAnims?.length) {
+            def.extraAnims.forEach((ad) => {
+              fbxLoader.load(ad.url, (animFbx) => {
+                if (animFbx.animations?.length && activeAnimMixer) {
+                  const action = activeAnimMixer.clipAction(animFbx.animations[0]);
+                  action.setLoop(THREE.LoopRepeat, Infinity);
+                  action.setEffectiveWeight(1);
+                  action.play();
+                  action.paused = true;
+                  activeAnimActions.set(ad.name, action);
+                  if (ad.name === "run" || !currentAction) currentAction = action;
+                }
+              }, undefined, () => { /* ignore extra anim load errors */ });
             });
-          });
+          }
+        } catch (err) {
+          console.warn("Model setup failed:", err);
         }
       };
 
       const isFbx = def.modelUrl.toLowerCase().endsWith(".fbx");
       if (isFbx) {
-        fbxLoader.load(def.modelUrl, setupModel);
+        fbxLoader.load(def.modelUrl, (fbx) => setupModel(fbx, fbx.animations || []), undefined, (err) => {
+          console.warn("Model load failed, continuing without character:", err);
+          loadingOverlay.style.transition = "opacity 0.6s ease";
+          loadingOverlay.style.opacity = "0";
+          setTimeout(() => { loadingOverlay.style.display = "none"; }, 600);
+        });
       } else {
-        gltfLoader.load(def.modelUrl, (gltf) => setupModel(gltf.scene));
+        gltfLoader.load(def.modelUrl, (gltf) => setupModel(gltf.scene, gltf.animations || []), undefined, (err) => {
+          console.warn("Model load failed, continuing without character:", err);
+          loadingOverlay.style.transition = "opacity 0.6s ease";
+          loadingOverlay.style.opacity = "0";
+          setTimeout(() => { loadingOverlay.style.display = "none"; }, 600);
+        });
       }
     }
   } else {
@@ -766,9 +1016,14 @@ function resetToLibrary() {
   }
   activeAnimActions.clear();
   currentAction = null;
+  cameraIntroProgress = 1;
   activeSceneLights.forEach((l) => scene.remove(l));
   activeSceneLights.length = 0;
+  activePortals.forEach(({ mesh }) => scene.remove(mesh));
+  activePortals.length = 0;
+  cameraIntroProgress = 1;
   inScene = false;
+  transitioningToSplat = false;
 
   loadingOverlay.style.display = "none";
   loadingOverlay.style.opacity = "0";
@@ -778,6 +1033,12 @@ function resetToLibrary() {
   header.style.opacity = "1";
   hint.style.display = "block";
   hint.style.opacity = "1";
+
+  // Restore splat quality defaults
+  spark.enableLod = true;
+  spark.lodSplatCount = 800000;
+  spark.lodSplatScale = 1.0;
+  renderer.setPixelRatio(DEFAULT_PIXEL_RATIO);
 
   libraryGroup.visible = true;
   scene.fog = new THREE.FogExp2(0x2a3a52, 0.018);
@@ -846,7 +1107,11 @@ function animate() {
 
   if (activeAnimMixer) activeAnimMixer.update(dt);
   updateCharacterMovement(dt);
-  if (activeModel && inScene) updateThirdPersonCamera(dt);
+  if (activeModel && inScene) {
+    if (cameraIntroProgress < 1) updateCameraIntro(dt);
+    else updateThirdPersonCamera(dt);
+    updatePortalCheck();
+  }
   updateBookOpen(dt);
   if (!inScene) checkHover();
   controls.update();
