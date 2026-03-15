@@ -22,6 +22,9 @@ export const BOOKS: BookDef[] = [
     sceneSubtitle: "Hogwarts — The Triwizard Tournament",
     narrativeText:
       "The enchanted ceiling of the Great Hall reflected a stormy sky. The Goblet of Fire flickered at the center, its blue flames casting dancing shadows across the long house tables...",
+    chapterNumber: "Chapter XII",
+    chapterDescription:
+      "The Great Hall of Hogwarts was alive with anticipation. Four long tables gleamed beneath the enchanted ceiling, whose clouds mimicked the storm raging outside. At the centre, the Goblet of Fire burned with an otherworldly blue flame, its magic crackling through the air as students from three schools gathered for the fateful Drawing.",
     locked: false,
     splatQuality: "low",
     modelUrl: "./models/harry.fbx",
@@ -38,6 +41,9 @@ export const BOOKS: BookDef[] = [
         targetSubtitle: "The cozy fireside haven",
         targetNarrativeText:
           "The portrait of the Fat Lady swung open. The familiar warmth of the Gryffindor Common Room enveloped Harry — crackling fire, worn armchairs, and the quiet murmur of friends...",
+        targetChapterNumber: "Chapter VIII",
+        targetChapterDescription:
+          "Beyond the portrait hole lay Gryffindor's hearth and home. Crimson armchairs flanked a crackling fire; brass lamps cast warm light across walls hung with tapestries of lions. Here, among the quiet chatter of housemates and the scent of wood smoke, Harry found refuge from the world beyond.",
         targetModelScale: 34,
         targetModelPosition: [0, -5, 1.5],
         targetModelRotation: [0, 0, 0],
@@ -52,7 +58,7 @@ export const BOOKS: BookDef[] = [
             name: "Hermione Granger",
             greeting:
               "Oh, hello Harry! Have you finished your Potions essay yet? I've already written three rolls of parchment.",
-            position: [4, 0, 0],
+            position: [6, 0, 0],
           },
           {
             url: "./models/ronald.fbx",
@@ -66,7 +72,7 @@ export const BOOKS: BookDef[] = [
             name: "Albus Dumbledore",
             greeting:
               "Ah, Harry. I had a feeling we might cross paths tonight. Tell me, have you tried the lemon drops?",
-            position: [-3, 0, 4],
+            position: [-4, 0, 6],
           },
         ],
       },

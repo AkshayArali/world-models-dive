@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Turning Points</title>
     <link
-      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Inter:wght@300;400;500&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Inter:wght@300;400;500&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Cinzel:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
     <style>
@@ -545,6 +545,129 @@
         border-color: rgba(212, 175, 55, 0.4);
         color: rgba(212, 175, 55, 0.95);
       }
+
+      /* ── Chapter scroll (hanging, top-left) ── */
+      #chapter-scroll {
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        z-index: 150;
+        width: min(320px, 38vw);
+        max-height: min(400px, 55vh);
+        overflow-y: auto;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.4s ease;
+        background: linear-gradient(
+          180deg,
+          #f5ebdc 0%,
+          #ede4d4 25%,
+          #e5dccb 50%,
+          #ddd4c4 75%,
+          #d5ccb8 100%
+        );
+        border-top: 8px solid #5c4033;
+        border-top-left-radius: 4px;
+        border-top-right-radius: 4px;
+        border-left: 1px solid rgba(139, 119, 79, 0.5);
+        border-right: 1px solid rgba(139, 119, 79, 0.5);
+        border-bottom: 1px solid rgba(139, 119, 79, 0.45);
+        border-bottom-left-radius: 80% 20px;
+        border-bottom-right-radius: 80% 20px;
+        box-shadow:
+          0 2px 0 rgba(0, 0, 0, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.25),
+          2px 8px 24px rgba(0, 0, 0, 0.4);
+        padding: 24px 28px 32px;
+      }
+      #chapter-scroll.visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #chapter-scroll::before {
+        content: "";
+        position: absolute;
+        top: -8px;
+        left: -4px;
+        right: -4px;
+        height: 12px;
+        background: linear-gradient(180deg, #6b5344 0%, #5c4033 50%, #4a3529 100%);
+        border-radius: 2px 2px 0 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+      }
+      #chapter-scroll::after {
+        content: "";
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 16px;
+        background: linear-gradient(180deg, transparent 0%, rgba(139, 119, 79, 0.15) 100%);
+        border-bottom-left-radius: 80% 20px;
+        border-bottom-right-radius: 80% 20px;
+        pointer-events: none;
+      }
+      #chapter-scroll::-webkit-scrollbar {
+        width: 5px;
+      }
+      #chapter-scroll::-webkit-scrollbar-track {
+        background: rgba(139, 119, 79, 0.1);
+        border-radius: 2px;
+      }
+      #chapter-scroll::-webkit-scrollbar-thumb {
+        background: rgba(139, 119, 79, 0.3);
+        border-radius: 2px;
+      }
+      #chapter-scroll .chapter-number {
+        font-family: "Cinzel", serif;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 5px;
+        text-transform: uppercase;
+        color: rgba(70, 52, 32, 0.9);
+        margin-bottom: 8px;
+        text-align: left;
+        border-bottom: 1px solid rgba(139, 119, 79, 0.25);
+        padding-bottom: 8px;
+        display: inline-block;
+      }
+      #chapter-scroll .chapter-title {
+        font-family: "Cormorant Garamond", serif;
+        font-size: 22px;
+        font-weight: 500;
+        letter-spacing: 1px;
+        color: rgba(45, 35, 22, 0.95);
+        margin-bottom: 12px;
+        line-height: 1.3;
+        text-align: left;
+      }
+      #chapter-scroll .chapter-description {
+        font-family: "Crimson Text", serif;
+        font-size: 14px;
+        font-style: italic;
+        line-height: 1.75;
+        color: rgba(65, 50, 35, 0.82);
+        text-align: left;
+      }
+      #chapter-scroll-dismiss {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        width: 24px;
+        height: 24px;
+        border: none;
+        background: rgba(139, 119, 79, 0.15);
+        color: rgba(80, 60, 35, 0.6);
+        font-size: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        line-height: 1;
+        border-radius: 2px;
+      }
+      #chapter-scroll-dismiss:hover {
+        color: rgba(80, 60, 35, 0.95);
+        background: rgba(139, 119, 79, 0.25);
+      }
     </style>
   </head>
   <body>
@@ -583,6 +706,14 @@
     <div id="controls-hint">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move &nbsp;&nbsp;
       <kbd>E</kbd> Talk &nbsp;&nbsp; <kbd>Shift</kbd> Sprint
+    </div>
+
+    <!-- Chapter scroll (Harry Potter theme) -->
+    <div id="chapter-scroll">
+      <button id="chapter-scroll-dismiss" aria-label="Close">&times;</button>
+      <div id="chapter-scroll-number" class="chapter-number"></div>
+      <div id="chapter-scroll-title" class="chapter-title"></div>
+      <div id="chapter-scroll-description" class="chapter-description"></div>
     </div>
 
     <!-- Chat panel -->

@@ -21,6 +21,8 @@ export interface PortalDef {
   targetTitle?: string;
   targetSubtitle?: string;
   targetNarrativeText?: string;
+  targetChapterNumber?: string;
+  targetChapterDescription?: string;
   bubbleText?: string;
   targetModelScale?: number;
   targetModelPosition?: [number, number, number];
@@ -42,6 +44,8 @@ export interface BookDef {
   sceneTitle: string;
   sceneSubtitle: string;
   narrativeText?: string;
+  chapterNumber?: string;
+  chapterDescription?: string;
   locked?: boolean;
   splatQuality?: "low" | "medium" | "high";
   modelUrl?: string;

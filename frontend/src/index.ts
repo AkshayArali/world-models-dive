@@ -33,6 +33,11 @@ const chatMessagesEl = document.getElementById("chat-messages")!;
 const chatInput = document.getElementById("chat-input") as HTMLInputElement;
 const chatSendBtn = document.getElementById("chat-send")!;
 const chatCloseBtn = document.getElementById("chat-close")!;
+const chapterScrollEl = document.getElementById("chapter-scroll")!;
+const chapterScrollNumber = document.getElementById("chapter-scroll-number")!;
+const chapterScrollTitle = document.getElementById("chapter-scroll-title")!;
+const chapterScrollDescription = document.getElementById("chapter-scroll-description")!;
+const chapterScrollDismiss = document.getElementById("chapter-scroll-dismiss")!;
 
 // ── Renderer ── (antialias: false = better perf for splats, no visual benefit)
 const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -350,6 +355,13 @@ function transitionToSplat(portal: PortalDef) {
         loadingOverlay.style.display = "none";
         loadingOverlay.style.transition = "none";
         narrativeTextEl.classList.remove("visible");
+        if (portal.targetChapterNumber) {
+          showChapterScroll(
+            portal.targetChapterNumber,
+            portal.targetTitle || "Gryffindor Common Room",
+            portal.targetChapterDescription || ""
+          );
+        }
       }, 700);
       controlsHint.classList.add("visible");
     },
@@ -483,6 +495,28 @@ function randomChapter(): string {
   return `Chapter ${Math.floor(Math.random() * 34) + 1}`;
 }
 
+let chapterScrollTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function showChapterScroll(number: string, title: string, description: string) {
+  if (chapterScrollTimeout) clearTimeout(chapterScrollTimeout);
+  chapterScrollNumber.textContent = number;
+  chapterScrollTitle.textContent = title;
+  chapterScrollDescription.textContent = description;
+  chapterScrollEl.classList.add("visible");
+  chapterScrollTimeout = setTimeout(() => {
+    chapterScrollEl.classList.remove("visible");
+    chapterScrollTimeout = null;
+  }, 5500);
+}
+
+function hideChapterScroll() {
+  if (chapterScrollTimeout) clearTimeout(chapterScrollTimeout);
+  chapterScrollTimeout = null;
+  chapterScrollEl.classList.remove("visible");
+}
+
+chapterScrollDismiss.addEventListener("click", hideChapterScroll);
+
 function enterScene(def: BookDef) {
   header.style.display = "none";
   hint.style.display = "none";
@@ -607,6 +641,9 @@ function enterScene(def: BookDef) {
           loadingOverlay.style.display = "none";
           loadingOverlay.style.transition = "none";
           narrativeTextEl.classList.remove("visible");
+          if (def.chapterNumber) {
+            showChapterScroll(def.chapterNumber, def.sceneTitle, def.chapterDescription || "");
+          }
         }, 900);
         if (def.modelUrl) controlsHint.classList.add("visible");
       },
@@ -720,6 +757,7 @@ function enterScene(def: BookDef) {
 
 function resetToLibrary() {
   if (isInPortalDestination) return; // cannot go back from inner chapter
+  hideChapterScroll();
   if (activeSplat) {
     scene.remove(activeSplat);
     activeSplat.dispose();
@@ -822,6 +860,7 @@ function resetToLibrary() {
   controls.minPolarAngle = Math.PI * 0.25;
   controls.enablePan = false;
 
+  hideChapterScroll();
   if (openingBook) {
     openingBook.coverPivot.rotation.y = 0;
     openingBook.pagePivots.forEach(pp => curlPage(pp, 0));
