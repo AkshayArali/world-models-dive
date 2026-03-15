@@ -263,15 +263,11 @@ function transitionToSplat(portal: PortalDef) {
               const npcHeight = box.max.y - box.min.y;
               const scale = (harryHeight / Math.max(npcHeight, 0.001)) * sceneScaleMult;
               model.scale.setScalar(scale);
-              box.setFromObject(model);
-              const c = box.getCenter(new THREE.Vector3());
-              model.position.set(-c.x, -box.min.y, -c.z);
-              if (sm.position) {
-                const [px, py = 0, pz] = sm.position;
-                const floorY = portal.targetFloorY ?? -2.2;
-                model.position.add(new THREE.Vector3(px, py + floorY, pz));
-                model.lookAt(0, model.position.y, 0);
-              }
+
+              const [px = 0, py = 0, pz = 0] = sm.position ?? [];
+              const floorY = portal.targetFloorY ?? -2.2;
+              model.position.set(px, py + floorY, pz);
+              model.lookAt(0, model.position.y, 0);
               if (sm.rotation) model.rotation.set(...sm.rotation);
               model.traverse((child) => {
                 if (child instanceof THREE.Mesh) {

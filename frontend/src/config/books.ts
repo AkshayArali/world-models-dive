@@ -39,7 +39,7 @@ export const BOOKS: BookDef[] = [
         targetNarrativeText:
           "The portrait of the Fat Lady swung open. The familiar warmth of the Gryffindor Common Room enveloped Harry — crackling fire, worn armchairs, and the quiet murmur of friends...",
         targetModelScale: 34,
-        targetModelPosition: [0, -7.2, 1.5],
+        targetModelPosition: [0, -5, 1.5],
         targetModelRotation: [0, 0, 0],
         targetSplatScale: 18,
         targetFloorY: -7.2,
@@ -52,21 +52,21 @@ export const BOOKS: BookDef[] = [
             name: "Hermione Granger",
             greeting:
               "Oh, hello Harry! Have you finished your Potions essay yet? I've already written three rolls of parchment.",
-            position: [3, 0, 0],
+            position: [4, 0, 0],
           },
           {
             url: "./models/ronald.fbx",
             name: "Ron Weasley",
             greeting:
               "Oi, Harry! Fancy a game of wizard's chess? I've been practising — reckon I could beat anyone in Gryffindor.",
-            position: [-2, 0, -3],
+            position: [-3, 0, -4],
           },
           {
             url: "./models/dumbledore.fbx",
             name: "Albus Dumbledore",
             greeting:
               "Ah, Harry. I had a feeling we might cross paths tonight. Tell me, have you tried the lemon drops?",
-            position: [-2, 0, 3],
+            position: [-3, 0, 4],
           },
         ],
       },
