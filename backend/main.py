@@ -1,18 +1,33 @@
 """
 Oz Learning Worlds — Backend API
 
-Serves chapter data, quiz validation, and progress tracking.
+Serves chapter data, quiz validation, progress tracking, and ElevenLabs narration.
 Run: uvicorn backend.main:app --reload --port 8080
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
-from fastapi import FastAPI
+
+from dotenv import load_dotenv
+
+# Load .env from project root (parent of backend/)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
+import httpx
 
 app = FastAPI(title="Oz Learning Worlds API", version="0.1.0")
+
+# ElevenLabs config
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID") or "21m00Tcm4TlvDq8ikWAM"  # Rachel
+NARRATION_CACHE_DIR = Path(__file__).resolve().parent.parent / ".narration_cache"
+NARRATION_CACHE_DIR.mkdir(exist_ok=True)
 
 app.add_middleware(
     CORSMiddleware,
@@ -158,6 +173,64 @@ def submit_quiz(submission: QuizSubmission):
         "answers_received": len(submission.answers),
         "message": "Quiz scoring is handled client-side for instant feedback",
     }
+
+
+class NarrationRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/narration")
+async def generate_narration(req: NarrationRequest):
+    """Generate spoken narration from text using ElevenLabs TTS."""
+    if not ELEVENLABS_API_KEY or ELEVENLABS_API_KEY == "your-elevenlabs-key-here":
+        raise HTTPException(
+            status_code=503,
+            detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY in .env",
+        )
+
+    text = (req.text or "").strip()
+    if len(text) > 5000:
+        text = text[:5000] + "..."
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    cache_key = hashlib.sha256(text.encode()).hexdigest()
+    cache_path = NARRATION_CACHE_DIR / f"{cache_key}.mp3"
+    if cache_path.exists():
+        return Response(
+            content=cache_path.read_bytes(),
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    payload = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+    }
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(url, json=payload, headers=headers)
+
+    if r.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ElevenLabs API error: {r.status_code}",
+        )
+
+    audio_bytes = r.content
+    cache_path.write_bytes(audio_bytes)
+
+    return Response(
+        content=audio_bytes,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/api/map")

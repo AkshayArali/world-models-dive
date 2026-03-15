@@ -13,6 +13,7 @@ import json
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Tuple
 
 API_KEY = os.getenv("MARBLE_API_KEY")
 BASE_URL = "https://api.worldlabs.ai/marble/v1"
@@ -113,7 +114,7 @@ SCENES = [
 ]
 
 
-def generate_world(scene: dict) -> tuple[str, str]:
+def generate_world(scene: dict) -> Tuple[str, str]:
     """Start a Marble world generation, return (scene_id, operation_id)."""
     resp = requests.post(
         f"{BASE_URL}/worlds:generate",
@@ -134,7 +135,7 @@ def generate_world(scene: dict) -> tuple[str, str]:
     return scene["id"], op_id
 
 
-def poll_until_done(scene_id: str, operation_id: str) -> dict | None:
+def poll_until_done(scene_id: str, operation_id: str) -> Optional[dict]:
     """Poll an operation until it completes."""
     while True:
         resp = requests.get(

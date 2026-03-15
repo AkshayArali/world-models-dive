@@ -19,7 +19,9 @@ backend/build
 
 # Generated / cache
 generated_worlds.json
+generated_oz_worlds.json
 .cache
+.narration_cache
 
 # OS
 .DS_Store
@@ -32,3 +34,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+harry-potter-chars/
+.venv/

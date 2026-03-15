@@ -51,7 +51,7 @@ export const OZ_WORLDS: OzWorld[] = [
     splatUrl: "./splats/sensai.spz",
     marblePrompt:
       "Flat gray Kansas prairie farmland, small weathered wooden farmhouse with a trapdoor cellar, dark dramatic storm clouds gathering overhead, a tornado funnel forming in the distance, windswept tall grass bending, dust and debris in the air, dramatic golden hour lighting breaking through storm clouds, photorealistic, cinematic",
-    mapPosition: [50, 95],
+    mapPosition: [50, 92],
     objects: [
       {
         id: "cyclone_cellar",
@@ -149,7 +149,7 @@ export const OZ_WORLDS: OzWorld[] = [
     splatUrl: "./splats/sensai.spz",
     marblePrompt:
       "Enchanted blue-themed village in a lush meadow, small thatched cottages painted blue, sparkling brook running through fields of blue wildflowers and tall blue-green crops, a bright yellow brick road winding through, colorful fruit trees, rolling green hills in background, bright warm sunshine, a scarecrow in a cornfield, magical fairy tale atmosphere, photorealistic",
-    mapPosition: [78, 45],
+    mapPosition: [82, 42],
     objects: [
       {
         id: "silver_shoes",
@@ -254,7 +254,7 @@ export const OZ_WORLDS: OzWorld[] = [
     splatUrl: "./splats/sensai.spz",
     marblePrompt:
       "Dense dark enchanted forest with towering ancient trees, purple-tinged twilight filtering through thick canopy, moss-covered tree trunks, a clearing with a rusty tin figure holding an axe, scattered autumn leaves, mysterious fog between trees, rays of light breaking through, magical dark fairy tale atmosphere, photorealistic, cinematic",
-    mapPosition: [50, 20],
+    mapPosition: [50, 12],
     objects: [
       {
         id: "oil_can",
@@ -353,7 +353,7 @@ export const OZ_WORLDS: OzWorld[] = [
     splatUrl: "./splats/sensai.spz",
     marblePrompt:
       "Vast field of brilliant scarlet red poppies stretching to the horizon, a winding yellow brick path through the flowers, a gentle river on one side, sleeping lion among the poppies, bright blue sky, distant green hills, butterflies and bees, magical dreamlike atmosphere, warm sunlight, photorealistic, cinematic",
-    mapPosition: [50, 50],
+    mapPosition: [35, 55],
     objects: [
       {
         id: "poppy_flower",
@@ -453,7 +453,7 @@ export const OZ_WORLDS: OzWorld[] = [
     splatUrl: "./splats/sensai.spz",
     marblePrompt:
       "Magnificent emerald green city with towering spires and domes made of green marble and crystal, streets paved with green stone embedded with sparkling emeralds, green glass windows reflecting green light everywhere, ornate green palace in the center, people in green clothing, green tinted atmosphere, magical glowing green light, fantasy fairy tale city, photorealistic, cinematic",
-    mapPosition: [50, 55],
+    mapPosition: [50, 40],
     objects: [
       {
         id: "green_spectacles",
@@ -555,7 +555,7 @@ export const OZ_WORLDS: OzWorld[] = [
     splatUrl: "./splats/sensai.spz",
     marblePrompt:
       "Barren yellow desert landscape with cracked dry earth, a dark imposing stone castle on a hill, scattered dead trees and dry scrubland, yellow-tinted dusty atmosphere, winged monkey silhouettes in the orange sky, desolate arid terrain, dry riverbed, dramatic sunset lighting casting long shadows, dark fairy tale atmosphere, photorealistic, cinematic",
-    mapPosition: [18, 45],
+    mapPosition: [15, 42],
     objects: [
       {
         id: "water_bucket",
@@ -666,7 +666,7 @@ export const OZ_WORLDS: OzWorld[] = [
     splatUrl: "./splats/sensai.spz",
     marblePrompt:
       "Magical miniature village made entirely of delicate white and painted porcelain, tiny china houses with colorful roofs, porcelain figurines of people and animals on a smooth white ground, pastel colors, a low white wall surrounding the village, twisted dark fighting trees at the border, warm soft lighting, fairy tale miniature atmosphere, photorealistic, tilt-shift effect",
-    mapPosition: [50, 78],
+    mapPosition: [72, 72],
     objects: [
       {
         id: "china_figure",
@@ -766,7 +766,7 @@ export const OZ_WORLDS: OzWorld[] = [
     splatUrl: "./splats/sensai.spz",
     marblePrompt:
       "Beautiful red rocky landscape with plateaus and cliff formations, red sandstone mesas and buttes, a magnificent pink and white castle with crystal towers in the distance, red wildflowers and red-leaved trees, warm golden red sunset lighting, dramatic cloud formations, red earth path leading to the castle, fairy tale meets desert canyon geology, photorealistic, cinematic",
-    mapPosition: [50, 88],
+    mapPosition: [30, 78],
     objects: [
       {
         id: "red_cliff",
@@ -881,13 +881,8 @@ export function saveWorldProgress(worldId: string, stars: number) {
   localStorage.setItem("oz_progress", JSON.stringify(progress));
 }
 
-export function isWorldUnlocked(worldId: string): boolean {
-  if (worldId === "kansas") return true;
-  const idx = OZ_WORLDS.findIndex((w) => w.id === worldId);
-  if (idx <= 0) return true;
-  const prevWorld = OZ_WORLDS[idx - 1];
-  const progress = getProgress();
-  return progress.some((p) => p.worldId === prevWorld.id && p.completed);
+export function isWorldUnlocked(_worldId: string): boolean {
+  return true;
 }
 
 export function getTotalStars(): number {

@@ -34,6 +34,24 @@
         font-size: 14px; color: rgba(255,255,255,0.4);
         letter-spacing: 3px; margin-top: 6px;
       }
+      .vr-btn {
+        position: fixed; top: 20px; right: 20px; z-index: 100;
+        margin: 0;
+        padding: 10px 24px;
+        background: rgba(100,180,255,0.2);
+        border: 1px solid rgba(100,180,255,0.4);
+        color: #aaddff;
+        border-radius: 24px;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        font-size: 12px; letter-spacing: 1.5px;
+        transition: all 0.2s;
+        pointer-events: auto;
+      }
+      .vr-btn:hover { background: rgba(100,180,255,0.35); }
+      .vr-btn.vr-active { background: rgba(46,204,113,0.25); border-color: rgba(46,204,113,0.6); color: #6ee7a0; }
+      .vr-btn.vr-active:hover { background: rgba(46,204,113,0.35); }
+      .vr-btn.unsupported { opacity: 0.5; cursor: not-allowed; }
 
       #book-tooltip {
         position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
@@ -121,10 +139,11 @@
         position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
         z-index: 50;
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        overflow: hidden;
+        overflow: auto;
         flex-direction: column;
         align-items: center;
         animation: fadeInMap 0.8s ease forwards;
+        pointer-events: auto;
       }
       @keyframes fadeInMap { from { opacity: 0; } to { opacity: 1; } }
 
@@ -157,31 +176,33 @@
       .oz-map-container {
         flex: 1;
         display: flex; align-items: center; justify-content: center;
-        width: 100%; padding: 10px 20px 20px;
+        width: 100%; padding: 10px 30px 20px;
         position: relative;
+        overflow: auto;
       }
 
       .oz-map-grid {
         position: relative;
-        width: min(600px, 80vw);
-        height: min(600px, 80vh);
-        border-radius: 50%;
+        width: min(780px, 90vw);
+        height: min(560px, 72vh);
+        border-radius: 16px;
         overflow: visible;
+        flex-shrink: 0;
       }
 
       .oz-quadrant {
         position: absolute;
-        border-radius: 8px;
-        opacity: 0.25;
-        transition: opacity 0.3s;
+        border-radius: 10px;
+        opacity: 0.18;
+        pointer-events: none;
       }
       .oz-quadrant-label {
         position: absolute;
         font-family: 'Fredoka', sans-serif;
-        font-size: 11px; font-weight: 500;
-        letter-spacing: 1px;
+        font-size: 10px; font-weight: 500;
+        letter-spacing: 1.5px;
         text-transform: uppercase;
-        opacity: 0.5;
+        opacity: 0.4;
         pointer-events: none;
       }
 
@@ -192,24 +213,26 @@
         z-index: 5;
         transition: transform 0.3s ease, filter 0.3s;
         text-align: center;
+        width: 110px;
       }
-      .oz-world-node:hover { transform: translate(-50%, -50%) scale(1.12); }
-      .oz-world-node.locked { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.8); }
+      .oz-world-node:hover { transform: translate(-50%, -50%) scale(1.1); }
+      .oz-world-node.locked { opacity: 0.35; cursor: not-allowed; filter: grayscale(0.8); }
+      .oz-world-node.locked:hover { transform: translate(-50%, -50%) scale(1.0); }
 
       .oz-node-circle {
-        width: 64px; height: 64px;
+        width: 56px; height: 56px;
         border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        font-size: 28px;
+        font-size: 24px;
         margin: 0 auto;
         box-shadow: 0 4px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
         border: 3px solid rgba(255,255,255,0.3);
         transition: box-shadow 0.3s, border-color 0.3s;
         position: relative;
       }
-      .oz-world-node:hover .oz-node-circle {
-        box-shadow: 0 4px 30px rgba(255,255,255,0.3);
-        border-color: rgba(255,255,255,0.6);
+      .oz-world-node:not(.locked):hover .oz-node-circle {
+        box-shadow: 0 0 24px rgba(255,255,255,0.35), 0 4px 20px rgba(0,0,0,0.4);
+        border-color: rgba(255,255,255,0.7);
       }
       .oz-node-stars {
         position: absolute; bottom: -4px; right: -4px;
@@ -221,17 +244,18 @@
       .oz-node-label {
         font-family: 'Fredoka', sans-serif;
         font-size: 11px; font-weight: 500;
-        margin-top: 6px;
-        color: rgba(255,255,255,0.85);
-        text-shadow: 0 2px 8px rgba(0,0,0,0.8);
-        max-width: 100px;
-        line-height: 1.2;
+        margin-top: 5px;
+        color: rgba(255,255,255,0.9);
+        text-shadow: 0 2px 10px rgba(0,0,0,0.9);
+        line-height: 1.3;
+        white-space: nowrap;
       }
       .oz-node-topic {
         font-family: 'Inter', sans-serif;
         font-size: 9px;
         color: rgba(255,255,255,0.45);
         margin-top: 2px;
+        white-space: nowrap;
       }
 
       .oz-map-back-btn {
@@ -267,16 +291,7 @@
       .oz-badge:hover { transform: scale(1.2); }
 
       .oz-center-label {
-        position: absolute;
-        top: 50%; left: 50%;
-        transform: translate(-50%, -50%);
-        font-family: 'Fredoka', sans-serif;
-        font-size: 14px; font-weight: 600;
-        color: rgba(46,204,113,0.5);
-        letter-spacing: 2px;
-        text-transform: uppercase;
-        pointer-events: none;
-        text-shadow: 0 0 20px rgba(46,204,113,0.3);
+        display: none;
       }
 
       /* ═══════════════════════════════════════════════
@@ -321,8 +336,30 @@
         font-size: 14px; line-height: 1.6;
         color: rgba(255,255,255,0.55);
         max-width: 500px;
-        margin-bottom: 24px;
+        margin-bottom: 16px;
         font-style: italic;
+      }
+      .intro-narration-controls {
+        display: flex; align-items: center; justify-content: center; gap: 12px;
+        margin-bottom: 24px;
+        font-family: 'Inter', sans-serif; font-size: 13px; color: rgba(255,255,255,0.6);
+      }
+      .intro-narration-controls button {
+        padding: 8px 16px;
+        border-radius: 20px;
+        border: 1px solid rgba(255,255,255,0.25);
+        background: rgba(255,255,255,0.08);
+        color: #fff;
+        cursor: pointer;
+        display: flex; align-items: center; gap: 6px;
+        transition: background 0.2s, border-color 0.2s;
+      }
+      .intro-narration-controls button:hover {
+        background: rgba(255,255,255,0.15);
+        border-color: rgba(255,255,255,0.4);
+      }
+      .intro-narration-controls .narration-status {
+        font-size: 12px; opacity: 0.8;
       }
       #oz-intro-overlay .intro-enter-btn {
         padding: 14px 40px;
@@ -346,7 +383,7 @@
       #oz-discovery-panel {
         display: none;
         position: fixed; top: 20px; right: 20px;
-        z-index: 20; pointer-events: auto;
+        z-index: 20; pointer-events: none; /* Pass-through so orb clicks hit canvas */
       }
       .discovery-items {
         display: flex; gap: 8px; flex-direction: column;
@@ -435,9 +472,10 @@
       #oz-scene-hud {
         display: none;
         position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-        z-index: 20; pointer-events: auto;
+        z-index: 20; pointer-events: none; /* Pass-through so orb clicks hit canvas */
         flex-direction: column; align-items: center; gap: 8px;
       }
+      #oz-scene-hud .oz-hud-btn { pointer-events: auto; }
       .oz-hud-info {
         background: rgba(0,0,0,0.6);
         backdrop-filter: blur(10px);
@@ -462,6 +500,10 @@
         color: rgba(243,156,18,0.8);
         margin-top: 4px;
       }
+      .oz-hud-narration-row {
+        display: flex; gap: 8px; justify-content: center;
+      }
+      .oz-hud-narration-row .oz-hud-btn { pointer-events: auto; }
       .oz-hud-buttons {
         display: flex; gap: 8px;
       }
@@ -667,6 +709,7 @@
         <p>Choose a book. Step inside. Change the story.</p>
       </div>
     </div>
+    <button id="vr-btn" class="vr-btn" title="Enter VR (Pico, Quest, etc.)">🥽 Enter VR</button>
 
     <div id="book-tooltip"></div>
     <div id="hint">Click a book to enter its world</div>
@@ -698,11 +741,17 @@
 
     <!-- ═══ WORLD INTRO ═══ -->
     <div id="oz-intro-overlay">
+      <button class="oz-map-back-btn" id="intro-back-btn" style="position:absolute;top:16px;left:16px">&larr; Back to Map</button>
       <div class="intro-icon" id="intro-icon"></div>
       <h2 id="intro-title"></h2>
       <div class="intro-stem-badge" id="intro-stem-badge"></div>
       <div class="intro-story" id="intro-story"></div>
       <div class="intro-science" id="intro-science"></div>
+      <div class="intro-narration-controls">
+        <button id="narration-play-pause" title="Play / Pause narration">▶ Play</button>
+        <button id="narration-mute" title="Mute / Unmute">🔊</button>
+        <span class="narration-status" id="narration-status"></span>
+      </div>
       <button class="intro-enter-btn" id="intro-enter-btn">Enter World</button>
     </div>
 
@@ -726,6 +775,10 @@
         <div class="hud-stem" id="oz-hud-stem"></div>
         <div class="hud-found" id="oz-hud-found"></div>
       </div>
+      <div class="oz-hud-narration-row">
+        <button class="oz-hud-btn oz-hud-narr-btn" id="oz-hud-narration-play" title="Play / Pause narration">▶ Listen</button>
+        <button class="oz-hud-btn oz-hud-narr-btn" id="oz-hud-narration-mute" title="Mute">🔊</button>
+      </div>
       <div class="oz-hud-buttons">
         <button class="oz-hud-btn" id="oz-hud-back">&larr; Back to Map</button>
         <button class="oz-hud-btn quiz-btn" id="oz-hud-quiz">Take the Quiz</button>
@@ -734,6 +787,7 @@
 
     <!-- ═══ QUIZ ═══ -->
     <div id="oz-quiz-overlay">
+      <button class="oz-map-back-btn" id="quiz-exit-btn" style="z-index:75">&larr; Exit Quiz</button>
       <div class="quiz-container" id="quiz-container">
         <div class="quiz-progress" id="quiz-progress"></div>
         <div class="quiz-question" id="quiz-question"></div>

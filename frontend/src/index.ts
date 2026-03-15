@@ -101,6 +101,10 @@ const ozSceneHud = document.getElementById("oz-scene-hud")!;
 const ozQuizOverlay = document.getElementById("oz-quiz-overlay")!;
 const greenFilter = document.getElementById("green-filter")!;
 const greenSpectaclesBtn = document.getElementById("green-spectacles-btn")! as HTMLButtonElement;
+const vrBtn = document.getElementById("vr-btn") as HTMLButtonElement | null;
+
+// Narration API (backend must run on 8080)
+const API_BASE = (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || "http://localhost:8080";
 
 // ── Renderer ──
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -110,6 +114,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 2.2;
+renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 
 // ── Scene ──
@@ -406,7 +411,12 @@ const fbxLoader = new FBXLoader();
 // ── Oz state ──
 let ozActive = false;
 let currentOzWorld: OzWorld | null = null;
+let ozNarrationAudio: HTMLAudioElement | null = null;
+let ozNarrationMuted = false;
+let ozNarrationRequestId = 0; // Guard against overlapping fetches playing multiple audios
+let ozSplatUrls: Record<string, { spz_500k?: string; spz_100k?: string }> = {}; // Marble-generated splats from API
 let ozDiscoveryOrbs: THREE.Mesh[] = [];
+let ozWorldEnvironment: THREE.Group | null = null; // Ground plane and simple props when splat is sparse
 let ozFoundObjects: Set<string> = new Set();
 let greenFilterOn = false;
 
@@ -503,15 +513,73 @@ renderer.domElement.addEventListener("mousemove", (e) => {
   mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 });
 
-renderer.domElement.addEventListener("click", () => {
+renderer.domElement.addEventListener("click", (e) => {
   if (hoveredBook && !hoveredBook.def.locked && !isOpening) {
     startOpenBook(hoveredBook);
     return;
   }
   if (inScene && ozActive && currentOzWorld) {
-    checkOrbClick();
+    // Use event coords for raycast (in case mousemove lag)
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    const hit = checkOrbClick();
+    if (hit) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   }
 });
+
+// Capture pointer events before OrbitControls when in Oz world — prevents orb clicks from triggering camera drag / accidental "back"
+renderer.domElement.addEventListener(
+  "pointerdown",
+  (e: PointerEvent) => {
+    if (!inScene || !ozActive || !currentOzWorld) return;
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(ozDiscoveryOrbs, true);
+    if (intersects.length > 0) {
+      let hit = intersects[0].object as THREE.Mesh;
+      while (hit && !hit.userData?.ozObject) hit = hit.parent as THREE.Mesh;
+      const obj = hit?.userData?.ozObject as OzObject | undefined;
+      if (obj && !ozFoundObjects.has(obj.id)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+  },
+  { capture: true }
+);
+
+// Document-level capture — handles orb clicks even when canvas doesn't receive events (e.g. Spark/SplatMesh setup)
+document.addEventListener(
+  "pointerdown",
+  (e: PointerEvent) => {
+    if (!inScene || !ozActive || !currentOzWorld || ozDiscoveryOrbs.length === 0) return;
+    // Only handle when click target is the canvas (i.e. not a button or other overlay)
+    if (e.target !== renderer.domElement) return;
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(ozDiscoveryOrbs, true);
+    if (intersects.length > 0) {
+      let mesh = intersects[0].object as THREE.Mesh;
+      while (mesh && !mesh.userData?.ozObject) mesh = mesh.parent as THREE.Mesh;
+      const obj = mesh?.userData?.ozObject as OzObject | undefined;
+      if (obj && !ozFoundObjects.has(obj.id)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        ozFoundObjects.add(obj.id);
+        showObjectPopup(obj);
+        markOrbFound(mesh, obj);
+        updateHudFound();
+      }
+    }
+  },
+  { capture: true }
+);
 
 function checkHover() {
   if (isOpening) return;
@@ -641,7 +709,7 @@ function updateBookOpen(dt: number) {
 //  OZ MAP
 // ══════════════════════════════════════════════════════
 
-function enterOzMap() {
+async function enterOzMap() {
   ozActive = true;
   libraryGroup.visible = false;
   header.style.display = "none";
@@ -650,18 +718,50 @@ function enterOzMap() {
   loadingOverlay.style.display = "none";
   loadingOverlay.style.opacity = "0";
 
+  // Fetch Marble-generated splat URLs from backend (from generated_oz_worlds.json)
+  try {
+    const res = await fetch(`${API_BASE}/api/worlds`);
+    if (res.ok) {
+      const data = await res.json();
+      const worlds = data.worlds || [];
+      ozSplatUrls = {};
+      worlds.forEach((w: { id?: string; splat_urls?: { spz_500k?: string; spz_100k?: string } }) => {
+        if (w.id && w.splat_urls) {
+          ozSplatUrls[w.id] = {
+            spz_500k: w.splat_urls.spz_500k,
+            spz_100k: w.splat_urls.spz_100k,
+          };
+        }
+      });
+    }
+  } catch (_) {
+    // Backend not running or CORS; keep ozSplatUrls empty, use placeholders
+  }
+
   buildOzMap();
   ozMapOverlay.style.display = "flex";
 }
 
 function buildOzMap() {
-  ozMapGrid.innerHTML = '<div class="oz-center-label">Emerald<br>City</div>';
+  ozMapGrid.innerHTML = "";
 
+  // Quadrant backgrounds — pointer-events: none so they never block clicks
   const quadrants = [
-    { name: "NORTH", color: "rgba(123,63,160,0.2)", label: "Gillikin Country", lColor: "#7B3FA0", pos: "top:0;left:15%;width:70%;height:35%", lPos: "top:5%;left:50%;transform:translateX(-50%)" },
-    { name: "EAST", color: "rgba(74,144,217,0.2)", label: "Munchkin Country", lColor: "#4A90D9", pos: "top:35%;right:0;width:40%;height:30%", lPos: "top:42%;right:5%" },
-    { name: "WEST", color: "rgba(241,196,15,0.2)", label: "Winkie Country", lColor: "#F1C40F", pos: "top:35%;left:0;width:40%;height:30%", lPos: "top:42%;left:5%" },
-    { name: "SOUTH", color: "rgba(231,76,60,0.2)", label: "Quadling Country", lColor: "#E74C3C", pos: "bottom:0;left:15%;width:70%;height:35%", lPos: "bottom:5%;left:50%;transform:translateX(-50%)" },
+    { color: "rgba(123,63,160,0.15)", label: "Gillikin Country (North)", lColor: "#9B59B6",
+      pos: "top:0;left:20%;width:60%;height:28%;border-radius:12px",
+      lPos: "top:4px;left:50%;transform:translateX(-50%)" },
+    { color: "rgba(74,144,217,0.15)", label: "Munchkin Country (East)", lColor: "#5DADE2",
+      pos: "top:28%;right:0;width:35%;height:34%;border-radius:12px",
+      lPos: "top:4px;right:8px;text-align:right" },
+    { color: "rgba(241,196,15,0.15)", label: "Winkie Country (West)", lColor: "#F4D03F",
+      pos: "top:28%;left:0;width:35%;height:34%;border-radius:12px",
+      lPos: "top:4px;left:8px" },
+    { color: "rgba(46,204,113,0.12)", label: "Emerald City (Center)", lColor: "#2ECC71",
+      pos: "top:30%;left:36%;width:28%;height:30%;border-radius:12px",
+      lPos: "top:4px;left:50%;transform:translateX(-50%);white-space:nowrap" },
+    { color: "rgba(231,76,60,0.15)", label: "Quadling Country (South)", lColor: "#E74C3C",
+      pos: "bottom:0;left:20%;width:60%;height:28%;border-radius:12px",
+      lPos: "bottom:4px;left:50%;transform:translateX(-50%)" },
   ];
 
   quadrants.forEach(q => {
@@ -691,6 +791,8 @@ function buildOzMap() {
     const wp = progress.find(p => p.worldId === world.id);
     const stars = wp ? wp.stars : 0;
 
+    const lockIcon = unlocked ? "" : '<div style="font-size:10px;opacity:0.6;margin-top:2px">🔒</div>';
+
     node.innerHTML = `
       <div class="oz-node-circle" style="background:${world.biomeColor}">
         ${world.badge.emoji}
@@ -698,22 +800,26 @@ function buildOzMap() {
       </div>
       <div class="oz-node-label">${world.name}</div>
       <div class="oz-node-topic">${world.stemTitle}</div>
+      ${lockIcon}
     `;
+    node.dataset.worldId = world.id;
 
     if (unlocked) {
-      node.addEventListener("click", () => showWorldIntro(world));
+      node.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        showWorldIntro(world);
+      });
     }
 
     ozMapGrid.appendChild(node);
   });
 
-  // Stats
   const totalStars = getTotalStars();
   const worldsDone = progress.filter(p => p.completed).length;
   document.getElementById("oz-total-stars")!.innerHTML = `⭐ ${totalStars} stars`;
   document.getElementById("oz-worlds-done")!.innerHTML = `🗺️ ${worldsDone}/${OZ_WORLDS.length} worlds`;
 
-  // Badges
   const badgeShelf = document.getElementById("oz-badge-shelf")!;
   badgeShelf.innerHTML = "";
   OZ_WORLDS.forEach((w) => {
@@ -727,8 +833,98 @@ function buildOzMap() {
 }
 
 // ══════════════════════════════════════════════════════
+//  NARRATION (ElevenLabs via backend)
+// ══════════════════════════════════════════════════════
+
+function updateNarrationUI(status: "idle" | "loading" | "playing" | "paused" | "muted" | "error") {
+  const playBtn = document.getElementById("narration-play-pause");
+  const muteBtn = document.getElementById("narration-mute");
+  const statusEl = document.getElementById("narration-status");
+  if (playBtn) playBtn.textContent = status === "playing" ? "⏸ Pause" : "▶ Play";
+  if (muteBtn) muteBtn.textContent = ozNarrationMuted ? "🔇" : "🔊";
+  if (statusEl)
+    statusEl.textContent =
+      status === "loading"
+        ? "Loading…"
+        : status === "playing"
+          ? "Listening…"
+          : status === "paused"
+            ? "Paused"
+            : status === "muted"
+              ? "Muted"
+              : status === "error"
+                ? "Unavailable"
+                : "";
+  // Sync HUD narration buttons (visible when in world)
+  const hudPlay = document.getElementById("oz-hud-narration-play");
+  const hudMute = document.getElementById("oz-hud-narration-mute");
+  if (hudPlay) hudPlay.textContent = status === "playing" ? "⏸ Pause" : "▶ Listen";
+  if (hudMute) hudMute.textContent = ozNarrationMuted ? "🔇" : "🔊";
+}
+
+function stopOzNarration() {
+  if (ozNarrationAudio) {
+    ozNarrationAudio.pause();
+    ozNarrationAudio.currentTime = 0;
+    ozNarrationAudio = null;
+  }
+  updateNarrationUI("idle");
+}
+
+async function playOzNarration(world: OzWorld) {
+  stopOzNarration();
+  const text = `${world.storySummary}\n\n${world.scienceIntro}`.trim();
+  if (!text) return;
+  const myId = ++ozNarrationRequestId;
+  updateNarrationUI("loading");
+  try {
+    const res = await fetch(`${API_BASE}/api/narration`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (myId !== ozNarrationRequestId) return; // Stale: another narration started
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    if (myId !== ozNarrationRequestId) return; // Stale: discard and don't play
+    const url = URL.createObjectURL(blob);
+    ozNarrationAudio = new Audio(url);
+    ozNarrationAudio.volume = ozNarrationMuted ? 0 : 1;
+    ozNarrationAudio.onended = () => {
+      URL.revokeObjectURL(url);
+      ozNarrationAudio = null;
+      updateNarrationUI("idle");
+    };
+    ozNarrationAudio.onerror = () => {
+      URL.revokeObjectURL(url);
+      ozNarrationAudio = null;
+      updateNarrationUI("error");
+    };
+    await ozNarrationAudio.play();
+    if (myId !== ozNarrationRequestId) {
+      stopOzNarration(); // We started an old request; stop it
+      return;
+    }
+    updateNarrationUI(ozNarrationMuted ? "muted" : "playing");
+  } catch (e) {
+    if (myId !== ozNarrationRequestId) return;
+    console.warn("Narration failed:", e);
+    updateNarrationUI("error");
+  }
+}
+
+// ══════════════════════════════════════════════════════
 //  WORLD INTRO
 // ══════════════════════════════════════════════════════
+
+function closeIntroOverlay(showMap = false) {
+  ozIntroOverlay.style.display = "none";
+  // Don't stop narration — user can control it from HUD when in world
+  if (showMap) ozMapOverlay.style.display = "flex";
+}
 
 function showWorldIntro(world: OzWorld) {
   currentOzWorld = world;
@@ -746,10 +942,13 @@ function showWorldIntro(world: OzWorld) {
   document.getElementById("intro-story")!.textContent = world.storySummary;
   document.getElementById("intro-science")!.textContent = world.scienceIntro;
 
+  // Don't auto-start — user clicks Play when ready
+  updateNarrationUI("idle");
+
   const enterBtn = document.getElementById("intro-enter-btn")! as HTMLButtonElement;
   enterBtn.style.background = `linear-gradient(135deg, ${world.biomeColor}, ${world.biomeColor}cc)`;
   enterBtn.onclick = () => {
-    ozIntroOverlay.style.display = "none";
+    closeIntroOverlay();
     ozMapOverlay.style.display = "none";
     enterOzWorld(world);
   };
@@ -766,10 +965,13 @@ function enterOzWorld(world: OzWorld) {
   loadingOverlay.style.display = "flex";
   loadingOverlay.style.opacity = "1";
 
-  scene.fog = null;
-  scene.background = new THREE.Color(0x000000);
+  scene.fog = new THREE.FogExp2(0x87ceeb, 0.015); // Soft sky-blue fog for kids
+  scene.background = new THREE.Color(0x87ceeb);   // Kid-friendly sky blue
 
-  const splatUrl = world.splatUrl || "./splats/sensai.spz";
+  // Prefer Marble-generated splat if available (from /api/worlds); else fallback to oz-data placeholder
+  const gen = ozSplatUrls[world.id];
+  const splatUrl =
+    (gen?.spz_500k || gen?.spz_100k) || world.splatUrl || "./splats/sensai.spz";
   const splat = new SplatMesh({
     url: splatUrl,
     onLoad: () => {
@@ -793,6 +995,23 @@ function enterOzWorld(world: OzWorld) {
       scene.add(amb);
       scene.add(dirLight);
       activeSceneLights.push(amb, dirLight);
+
+      // Ground and simple environment so scene isn't empty when splat is sparse
+      if (ozWorldEnvironment) {
+        scene.remove(ozWorldEnvironment);
+        ozWorldEnvironment = null;
+      }
+      const env = new THREE.Group();
+      const groundGeo = new THREE.PlaneGeometry(60, 60);
+      groundGeo.rotateX(-Math.PI / 2);
+      const groundMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(world.biomeColor),
+      });
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.position.y = -0.5;
+      env.add(ground);
+      scene.add(env);
+      ozWorldEnvironment = env;
 
       spawnDiscoveryOrbs(world);
       showOzSceneHud(world);
@@ -821,7 +1040,7 @@ function spawnDiscoveryOrbs(world: OzWorld) {
   ozDiscoveryPanel.style.display = "block";
 
   world.objects.forEach((obj) => {
-    const geo = new THREE.SphereGeometry(0.15, 16, 16);
+    const geo = new THREE.SphereGeometry(0.35, 20, 20); // Larger for easier clicking
     const mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(world.biomeColor),
       transparent: true,
@@ -830,10 +1049,11 @@ function spawnDiscoveryOrbs(world: OzWorld) {
     const orb = new THREE.Mesh(geo, mat);
     orb.position.set(...obj.position);
     orb.userData.ozObject = obj;
+    orb.userData.baseY = obj.position[1];
     scene.add(orb);
     ozDiscoveryOrbs.push(orb);
 
-    const outerGeo = new THREE.SphereGeometry(0.25, 16, 16);
+    const outerGeo = new THREE.SphereGeometry(0.45, 20, 20);
     const outerMat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(world.biomeColor),
       transparent: true,
@@ -852,19 +1072,23 @@ function spawnDiscoveryOrbs(world: OzWorld) {
   });
 }
 
-function checkOrbClick() {
+function checkOrbClick(): boolean {
   raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects(ozDiscoveryOrbs, false);
+  const intersects = raycaster.intersectObjects(ozDiscoveryOrbs, true);
   if (intersects.length > 0) {
-    const orb = intersects[0].object as THREE.Mesh;
-    const obj = orb.userData.ozObject as OzObject;
+    let mesh = intersects[0].object as THREE.Mesh;
+    while (mesh && !mesh.userData?.ozObject) mesh = mesh.parent as THREE.Mesh;
+    const obj = mesh?.userData?.ozObject as OzObject | undefined;
     if (obj && !ozFoundObjects.has(obj.id)) {
       ozFoundObjects.add(obj.id);
       showObjectPopup(obj);
-      markOrbFound(orb, obj);
+      markOrbFound(mesh, obj);
       updateHudFound();
+      return true;
     }
+    return true; // Hit orb (even if already found)
   }
+  return false;
 }
 
 function markOrbFound(orb: THREE.Mesh, obj: OzObject) {
@@ -886,6 +1110,31 @@ function showObjectPopup(obj: OzObject) {
 
 document.getElementById("popup-close")!.addEventListener("click", () => {
   ozObjectPopup.style.display = "none";
+});
+
+// Narration controls
+document.getElementById("narration-play-pause")?.addEventListener("click", () => {
+  if (ozNarrationAudio) {
+    if (ozNarrationAudio.paused) {
+      ozNarrationAudio.play();
+      updateNarrationUI(ozNarrationMuted ? "muted" : "playing");
+    } else {
+      ozNarrationAudio.pause();
+      updateNarrationUI("paused");
+    }
+  } else if (currentOzWorld) {
+    playOzNarration(currentOzWorld);
+  }
+});
+document.getElementById("narration-mute")?.addEventListener("click", () => {
+  ozNarrationMuted = !ozNarrationMuted;
+  if (ozNarrationAudio) ozNarrationAudio.volume = ozNarrationMuted ? 0 : 1;
+  const status = ozNarrationAudio?.paused ? "paused" : ozNarrationMuted ? "muted" : "playing";
+  updateNarrationUI(status);
+});
+document.getElementById("intro-back-btn")?.addEventListener("click", () => {
+  closeIntroOverlay();
+  ozMapOverlay.style.display = "flex";
 });
 
 function showOzSceneHud(world: OzWorld) {
@@ -915,6 +1164,10 @@ document.getElementById("oz-hud-quiz")!.addEventListener("click", () => {
 
 function exitOzWorld() {
   if (activeSplat) { scene.remove(activeSplat); activeSplat.dispose(); activeSplat = null; }
+  if (ozWorldEnvironment) {
+    scene.remove(ozWorldEnvironment);
+    ozWorldEnvironment = null;
+  }
   ozDiscoveryOrbs.forEach(orb => scene.remove(orb));
   ozDiscoveryOrbs = [];
   activeSceneLights.forEach(l => scene.remove(l));
@@ -1071,6 +1324,10 @@ document.getElementById("results-back-btn")!.addEventListener("click", () => {
   exitOzWorld();
 });
 
+document.getElementById("quiz-exit-btn")!.addEventListener("click", () => {
+  ozQuizOverlay.style.display = "none";
+});
+
 // ══════════════════════════════════════════════════════
 //  STANDARD SCENE (non-Oz books)
 // ══════════════════════════════════════════════════════
@@ -1170,6 +1427,7 @@ function enterScene(def: BookDef) {
 }
 
 function resetToLibrary() {
+  stopOzNarration();
   if (activeSplat) { scene.remove(activeSplat); activeSplat.dispose(); activeSplat = null; }
   if (activeModel) { scene.remove(activeModel); activeModel = null; }
   if (activeAnimMixer) { activeAnimMixer.stopAllAction(); activeAnimMixer = null; }
@@ -1188,6 +1446,7 @@ function resetToLibrary() {
   loadingOverlay.style.transition = "none";
   sceneInfo.style.display = "none";
   ozMapOverlay.style.display = "none";
+  ozIntroOverlay.style.display = "none";
   ozSceneHud.style.display = "none";
   ozDiscoveryPanel.style.display = "none";
   ozObjectPopup.style.display = "none";
@@ -1227,6 +1486,38 @@ function resetToLibrary() {
 backBtn.addEventListener("click", resetToLibrary);
 ozMapBack.addEventListener("click", resetToLibrary);
 
+ // ── WebXR (Pico VR, Quest, etc.) ──
+if (vrBtn) {
+  if (!("xr" in navigator)) {
+    vrBtn.textContent = "VR not supported";
+    vrBtn.classList.add("unsupported");
+    vrBtn.disabled = true;
+  } else {
+    vrBtn.addEventListener("click", async () => {
+      if (renderer.xr.isPresenting) {
+        const session = renderer.xr.getSession();
+        if (session) await session.end();
+        return;
+      }
+      try {
+        const session = await navigator.xr!.requestSession("immersive-vr", {
+          optionalFeatures: ["local-floor"],
+        });
+        await renderer.xr.setSession(session);
+        vrBtn.textContent = "Exit VR";
+        vrBtn.classList.add("vr-active");
+        session.addEventListener("end", () => {
+          vrBtn.textContent = "🥽 Enter VR";
+          vrBtn.classList.remove("vr-active");
+          if (!isOpening) controls.enabled = true;
+        });
+      } catch (e) {
+        console.warn("WebXR session failed:", e);
+      }
+    });
+  }
+}
+
 // ── Easing helpers ──
 function easeOutCubic(t: number) { return 1 - Math.pow(1 - t, 3); }
 function easeInOutCubic(t: number) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
@@ -1238,9 +1529,13 @@ function smoothClamp(t: number, start: number, end: number) {
 const clock = new THREE.Clock();
 
 function animate() {
-  requestAnimationFrame(animate);
   const dt = clock.getDelta();
   const t = clock.getElapsedTime();
+  const inVR = renderer.xr.isPresenting;
+
+  if (inVR) {
+    controls.enabled = false;
+  }
 
   bookMeshes.forEach((b, i) => {
     if (b === openingBook) return;
@@ -1263,20 +1558,21 @@ function animate() {
   fp.needsUpdate = true;
   ffMat.opacity = 0.5 + Math.sin(t * 1.8) * 0.2;
 
-  // Animate discovery orbs
+  // Animate discovery orbs (non-cumulative, subtle bobbing)
   ozDiscoveryOrbs.forEach((orb, i) => {
-    orb.position.y += Math.sin(t * 2 + i * 1.5) * 0.001;
+    const baseY = orb.userData.baseY as number ?? orb.position.y;
+    orb.position.y = baseY + Math.sin(t * 0.8 + i * 1.2) * 0.04;
     const mat = orb.material as THREE.MeshBasicMaterial;
-    mat.opacity = 0.5 + Math.sin(t * 3 + i * 2) * 0.3;
-    orb.scale.setScalar(1 + Math.sin(t * 2.5 + i) * 0.1);
+    mat.opacity = 0.6 + Math.sin(t * 1.2 + i) * 0.15;
+    orb.scale.setScalar(1 + Math.sin(t * 1 + i * 0.5) * 0.04);
   });
 
   if (activeAnimMixer) activeAnimMixer.update(dt);
-  updateCharacterMovement(dt);
-  if (activeModel && inScene) updateThirdPersonCamera(dt);
+  if (!inVR) updateCharacterMovement(dt);
+  if (activeModel && inScene && !inVR) updateThirdPersonCamera(dt);
   updateBookOpen(dt);
   if (!inScene && !ozActive) checkHover();
-  controls.update();
+  if (!inVR) controls.update();
   spark.render(scene, camera);
 }
 
@@ -1288,4 +1584,4 @@ window.addEventListener("resize", () => {
 });
 
 // ── Start ──
-animate();
+renderer.setAnimationLoop(animate);
