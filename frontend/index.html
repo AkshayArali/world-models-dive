@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Turning Points</title>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=Inter:wght@300;400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=Inter:wght@300;400;500;600&family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { background: #000; overflow: hidden; color: #fff; }
@@ -60,7 +60,6 @@
         transition: opacity 0.5s ease;
       }
 
-      /* Loading overlay */
       #loading-overlay {
         position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
         background: radial-gradient(ellipse at center, #fffbe8 0%, #fff 60%, #f0ebe0 100%);
@@ -84,7 +83,6 @@
       }
       @keyframes spin { to { transform: rotate(360deg); } }
 
-      /* Scene view (when inside a book) */
       #scene-info {
         display: none;
         position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
@@ -114,6 +112,546 @@
         transition: background 0.2s;
       }
       #back-btn:hover { background: rgba(255,255,255,0.15); }
+
+      /* ═══════════════════════════════════════════════
+         OZ MAP OVERLAY
+         ═══════════════════════════════════════════════ */
+      #oz-map-overlay {
+        display: none;
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        z-index: 50;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        overflow: hidden;
+        flex-direction: column;
+        align-items: center;
+        animation: fadeInMap 0.8s ease forwards;
+      }
+      @keyframes fadeInMap { from { opacity: 0; } to { opacity: 1; } }
+
+      .oz-map-header {
+        text-align: center; padding: 24px 20px 8px;
+        width: 100%;
+      }
+      .oz-map-header h1 {
+        font-family: 'Fredoka', sans-serif;
+        font-size: 36px; font-weight: 600;
+        background: linear-gradient(135deg, #f39c12, #e74c3c, #9b59b6, #2ecc71);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        letter-spacing: 2px;
+      }
+      .oz-map-header p {
+        font-family: 'Inter', sans-serif;
+        font-size: 13px; color: rgba(255,255,255,0.5);
+        margin-top: 4px;
+      }
+      .oz-map-stats {
+        display: flex; gap: 20px; justify-content: center;
+        margin-top: 8px;
+        font-family: 'Inter', sans-serif; font-size: 13px;
+        color: rgba(255,255,255,0.7);
+      }
+      .oz-map-stats span { display: flex; align-items: center; gap: 4px; }
+
+      .oz-map-container {
+        flex: 1;
+        display: flex; align-items: center; justify-content: center;
+        width: 100%; padding: 10px 20px 20px;
+        position: relative;
+      }
+
+      .oz-map-grid {
+        position: relative;
+        width: min(600px, 80vw);
+        height: min(600px, 80vh);
+        border-radius: 50%;
+        overflow: visible;
+      }
+
+      .oz-quadrant {
+        position: absolute;
+        border-radius: 8px;
+        opacity: 0.25;
+        transition: opacity 0.3s;
+      }
+      .oz-quadrant-label {
+        position: absolute;
+        font-family: 'Fredoka', sans-serif;
+        font-size: 11px; font-weight: 500;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        opacity: 0.5;
+        pointer-events: none;
+      }
+
+      .oz-world-node {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        cursor: pointer;
+        z-index: 5;
+        transition: transform 0.3s ease, filter 0.3s;
+        text-align: center;
+      }
+      .oz-world-node:hover { transform: translate(-50%, -50%) scale(1.12); }
+      .oz-world-node.locked { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.8); }
+
+      .oz-node-circle {
+        width: 64px; height: 64px;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 28px;
+        margin: 0 auto;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+        border: 3px solid rgba(255,255,255,0.3);
+        transition: box-shadow 0.3s, border-color 0.3s;
+        position: relative;
+      }
+      .oz-world-node:hover .oz-node-circle {
+        box-shadow: 0 4px 30px rgba(255,255,255,0.3);
+        border-color: rgba(255,255,255,0.6);
+      }
+      .oz-node-stars {
+        position: absolute; bottom: -4px; right: -4px;
+        background: #1a1a2e; border-radius: 10px; padding: 1px 5px;
+        font-size: 10px; line-height: 1;
+        border: 1px solid rgba(255,255,255,0.2);
+      }
+
+      .oz-node-label {
+        font-family: 'Fredoka', sans-serif;
+        font-size: 11px; font-weight: 500;
+        margin-top: 6px;
+        color: rgba(255,255,255,0.85);
+        text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+        max-width: 100px;
+        line-height: 1.2;
+      }
+      .oz-node-topic {
+        font-family: 'Inter', sans-serif;
+        font-size: 9px;
+        color: rgba(255,255,255,0.45);
+        margin-top: 2px;
+      }
+
+      .oz-map-back-btn {
+        position: absolute; top: 20px; left: 20px;
+        padding: 8px 16px;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        color: #fff; border-radius: 6px;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        font-size: 12px;
+        transition: background 0.2s;
+        z-index: 10;
+      }
+      .oz-map-back-btn:hover { background: rgba(255,255,255,0.2); }
+
+      .oz-badge-shelf {
+        position: absolute; top: 20px; right: 20px;
+        display: flex; gap: 6px;
+        z-index: 10;
+      }
+      .oz-badge {
+        width: 36px; height: 36px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.1);
+        border: 2px solid rgba(255,255,255,0.15);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 18px;
+        transition: transform 0.3s;
+        cursor: default;
+      }
+      .oz-badge.earned { border-color: #f39c12; background: rgba(243,156,18,0.15); }
+      .oz-badge:hover { transform: scale(1.2); }
+
+      .oz-center-label {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        font-family: 'Fredoka', sans-serif;
+        font-size: 14px; font-weight: 600;
+        color: rgba(46,204,113,0.5);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        pointer-events: none;
+        text-shadow: 0 0 20px rgba(46,204,113,0.3);
+      }
+
+      /* ═══════════════════════════════════════════════
+         WORLD INTRO OVERLAY
+         ═══════════════════════════════════════════════ */
+      #oz-intro-overlay {
+        display: none;
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        z-index: 60;
+        background: rgba(0,0,0,0.85);
+        backdrop-filter: blur(20px);
+        flex-direction: column;
+        align-items: center; justify-content: center;
+        text-align: center;
+        padding: 40px;
+        animation: fadeInMap 0.5s ease forwards;
+      }
+      #oz-intro-overlay .intro-icon {
+        font-size: 64px; margin-bottom: 16px;
+      }
+      #oz-intro-overlay h2 {
+        font-family: 'Fredoka', sans-serif;
+        font-size: 32px; font-weight: 600;
+        margin-bottom: 8px;
+      }
+      #oz-intro-overlay .intro-stem-badge {
+        font-family: 'Inter', sans-serif;
+        font-size: 12px; font-weight: 500;
+        padding: 4px 16px; border-radius: 20px;
+        display: inline-block; margin-bottom: 16px;
+        letter-spacing: 1px; text-transform: uppercase;
+      }
+      #oz-intro-overlay .intro-story {
+        font-family: 'Inter', sans-serif;
+        font-size: 15px; line-height: 1.7;
+        color: rgba(255,255,255,0.75);
+        max-width: 600px;
+        margin-bottom: 12px;
+      }
+      #oz-intro-overlay .intro-science {
+        font-family: 'Inter', sans-serif;
+        font-size: 14px; line-height: 1.6;
+        color: rgba(255,255,255,0.55);
+        max-width: 500px;
+        margin-bottom: 24px;
+        font-style: italic;
+      }
+      #oz-intro-overlay .intro-enter-btn {
+        padding: 14px 40px;
+        border-radius: 30px;
+        border: none;
+        font-family: 'Fredoka', sans-serif;
+        font-size: 16px; font-weight: 600;
+        cursor: pointer;
+        color: #fff;
+        letter-spacing: 1px;
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+      #oz-intro-overlay .intro-enter-btn:hover {
+        transform: scale(1.05);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+      }
+
+      /* ═══════════════════════════════════════════════
+         OBJECT DISCOVERY
+         ═══════════════════════════════════════════════ */
+      #oz-discovery-panel {
+        display: none;
+        position: fixed; top: 20px; right: 20px;
+        z-index: 20; pointer-events: auto;
+      }
+      .discovery-items {
+        display: flex; gap: 8px; flex-direction: column;
+      }
+      .discovery-item {
+        width: 48px; height: 48px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.5);
+        border: 2px solid rgba(255,255,255,0.15);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 22px;
+        backdrop-filter: blur(8px);
+        transition: all 0.3s;
+        cursor: default;
+        opacity: 0.4;
+      }
+      .discovery-item.found {
+        opacity: 1;
+        border-color: #f39c12;
+        background: rgba(243,156,18,0.15);
+        animation: discoveryPop 0.5s ease;
+      }
+      @keyframes discoveryPop {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.3); }
+        100% { transform: scale(1); }
+      }
+
+      #oz-object-popup {
+        display: none;
+        position: fixed;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 25;
+        background: rgba(15,15,30,0.95);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 16px;
+        padding: 28px 32px;
+        max-width: 420px;
+        width: 90vw;
+        backdrop-filter: blur(20px);
+        pointer-events: auto;
+        animation: popupSlideIn 0.4s ease;
+      }
+      @keyframes popupSlideIn {
+        from { opacity: 0; transform: translate(-50%, -45%); }
+        to { opacity: 1; transform: translate(-50%, -50%); }
+      }
+      #oz-object-popup .popup-emoji { font-size: 48px; text-align: center; }
+      #oz-object-popup h3 {
+        font-family: 'Fredoka', sans-serif;
+        font-size: 22px; text-align: center; margin: 8px 0;
+      }
+      #oz-object-popup .popup-fact {
+        font-family: 'Inter', sans-serif;
+        font-size: 14px; line-height: 1.7;
+        color: rgba(255,255,255,0.75);
+        margin-bottom: 8px;
+      }
+      #oz-object-popup .popup-stem {
+        font-family: 'Inter', sans-serif;
+        font-size: 12px;
+        color: rgba(46,204,113,0.8);
+        padding: 6px 12px;
+        background: rgba(46,204,113,0.1);
+        border-radius: 8px;
+        margin-bottom: 16px;
+      }
+      #oz-object-popup .popup-close {
+        display: block;
+        margin: 0 auto;
+        padding: 8px 24px;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        color: #fff;
+        border-radius: 6px;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        font-size: 12px;
+      }
+      #oz-object-popup .popup-close:hover { background: rgba(255,255,255,0.2); }
+
+      /* ═══════════════════════════════════════════════
+         OZ SCENE HUD (replaces scene-info for Oz worlds)
+         ═══════════════════════════════════════════════ */
+      #oz-scene-hud {
+        display: none;
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        z-index: 20; pointer-events: auto;
+        flex-direction: column; align-items: center; gap: 8px;
+      }
+      .oz-hud-info {
+        background: rgba(0,0,0,0.6);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        padding: 12px 24px;
+        text-align: center;
+      }
+      .oz-hud-info h3 {
+        font-family: 'Fredoka', sans-serif;
+        font-size: 16px; font-weight: 500;
+      }
+      .oz-hud-info .hud-stem {
+        font-family: 'Inter', sans-serif;
+        font-size: 11px;
+        color: rgba(255,255,255,0.5);
+        margin-top: 2px;
+      }
+      .oz-hud-info .hud-found {
+        font-family: 'Inter', sans-serif;
+        font-size: 11px;
+        color: rgba(243,156,18,0.8);
+        margin-top: 4px;
+      }
+      .oz-hud-buttons {
+        display: flex; gap: 8px;
+      }
+      .oz-hud-btn {
+        padding: 8px 20px;
+        border-radius: 20px;
+        border: 1px solid rgba(255,255,255,0.2);
+        background: rgba(0,0,0,0.5);
+        color: #fff;
+        cursor: pointer;
+        font-family: 'Fredoka', sans-serif;
+        font-size: 13px; font-weight: 500;
+        transition: all 0.2s;
+        backdrop-filter: blur(8px);
+      }
+      .oz-hud-btn:hover { background: rgba(255,255,255,0.15); }
+      .oz-hud-btn.quiz-btn {
+        background: rgba(46,204,113,0.2);
+        border-color: rgba(46,204,113,0.4);
+      }
+      .oz-hud-btn.quiz-btn:hover { background: rgba(46,204,113,0.35); }
+
+      /* ═══════════════════════════════════════════════
+         QUIZ OVERLAY
+         ═══════════════════════════════════════════════ */
+      #oz-quiz-overlay {
+        display: none;
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        z-index: 70;
+        background: rgba(10,10,30,0.92);
+        backdrop-filter: blur(20px);
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 30px;
+      }
+      .quiz-container {
+        max-width: 560px; width: 100%;
+      }
+      .quiz-progress {
+        display: flex; gap: 6px; justify-content: center; margin-bottom: 24px;
+      }
+      .quiz-dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: rgba(255,255,255,0.15);
+        transition: all 0.3s;
+      }
+      .quiz-dot.active { background: #f39c12; transform: scale(1.3); }
+      .quiz-dot.correct { background: #2ecc71; }
+      .quiz-dot.wrong { background: #e74c3c; }
+
+      .quiz-question {
+        font-family: 'Fredoka', sans-serif;
+        font-size: 22px; font-weight: 500;
+        text-align: center;
+        line-height: 1.4;
+        margin-bottom: 24px;
+        min-height: 65px;
+      }
+      .quiz-options {
+        display: flex; flex-direction: column; gap: 10px;
+      }
+      .quiz-option {
+        padding: 14px 20px;
+        border-radius: 12px;
+        border: 2px solid rgba(255,255,255,0.15);
+        background: rgba(255,255,255,0.05);
+        color: #fff;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        font-size: 15px;
+        text-align: left;
+        transition: all 0.25s;
+      }
+      .quiz-option:hover {
+        border-color: rgba(255,255,255,0.4);
+        background: rgba(255,255,255,0.1);
+      }
+      .quiz-option.selected {
+        border-color: #3498db;
+        background: rgba(52,152,219,0.15);
+      }
+      .quiz-option.correct-answer {
+        border-color: #2ecc71;
+        background: rgba(46,204,113,0.2);
+        animation: correctPulse 0.6s ease;
+      }
+      .quiz-option.wrong-answer {
+        border-color: #e74c3c;
+        background: rgba(231,76,60,0.15);
+      }
+      @keyframes correctPulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.02); }
+        100% { transform: scale(1); }
+      }
+
+      .quiz-explanation {
+        font-family: 'Inter', sans-serif;
+        font-size: 14px; line-height: 1.6;
+        color: rgba(255,255,255,0.7);
+        background: rgba(255,255,255,0.05);
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin-top: 16px;
+        border-left: 3px solid #2ecc71;
+        display: none;
+      }
+      .quiz-next-btn {
+        display: none;
+        margin: 16px auto 0;
+        padding: 10px 32px;
+        border-radius: 24px;
+        border: none;
+        background: linear-gradient(135deg, #2ecc71, #27ae60);
+        color: #fff;
+        font-family: 'Fredoka', sans-serif;
+        font-size: 15px; font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+      .quiz-next-btn:hover { transform: scale(1.05); }
+
+      /* Quiz results */
+      .quiz-results {
+        display: none;
+        text-align: center;
+      }
+      .quiz-results .results-stars {
+        font-size: 48px; margin-bottom: 12px;
+      }
+      .quiz-results h2 {
+        font-family: 'Fredoka', sans-serif;
+        font-size: 28px; font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .quiz-results .results-score {
+        font-family: 'Inter', sans-serif;
+        font-size: 16px;
+        color: rgba(255,255,255,0.6);
+        margin-bottom: 8px;
+      }
+      .quiz-results .results-badge {
+        font-size: 16px;
+        margin-bottom: 20px;
+        color: #f39c12;
+      }
+      .quiz-results .results-btn {
+        padding: 12px 32px;
+        border-radius: 24px;
+        border: none;
+        background: linear-gradient(135deg, #9b59b6, #8e44ad);
+        color: #fff;
+        font-family: 'Fredoka', sans-serif;
+        font-size: 15px; font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+      .quiz-results .results-btn:hover { transform: scale(1.05); }
+
+      /* ═══════════════════════════════════════════════
+         GREEN SPECTACLES FILTER (Emerald City)
+         ═══════════════════════════════════════════════ */
+      #green-filter {
+        display: none;
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(0, 180, 60, 0.15);
+        pointer-events: none; z-index: 5;
+        border-radius: 0;
+        transition: opacity 0.5s;
+      }
+      .green-filter-active #green-filter { display: block; }
+
+      .green-spectacles-toggle {
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+        z-index: 22;
+        padding: 8px 18px;
+        border-radius: 20px;
+        background: rgba(46,204,113,0.2);
+        border: 1px solid rgba(46,204,113,0.4);
+        color: #2ecc71;
+        font-family: 'Fredoka', sans-serif;
+        font-size: 13px; font-weight: 500;
+        cursor: pointer;
+        display: none;
+        transition: all 0.2s;
+      }
+      .green-spectacles-toggle:hover {
+        background: rgba(46,204,113,0.35);
+      }
     </style>
   </head>
   <body>
@@ -136,8 +674,85 @@
     <div id="scene-info">
       <h2 id="scene-title"></h2>
       <p id="scene-subtitle"></p>
-      <button id="back-btn">← Back to Library</button>
+      <button id="back-btn">&larr; Back to Library</button>
     </div>
+
+    <!-- ═══ OZ MAP ═══ -->
+    <div id="oz-map-overlay">
+      <button class="oz-map-back-btn" id="oz-map-back">&larr; Back to Library</button>
+      <div class="oz-badge-shelf" id="oz-badge-shelf"></div>
+      <div class="oz-map-header">
+        <h1>The Land of Oz</h1>
+        <p>Explore 8 worlds. Discover science hidden in every chapter.</p>
+        <div class="oz-map-stats">
+          <span id="oz-total-stars"></span>
+          <span id="oz-worlds-done"></span>
+        </div>
+      </div>
+      <div class="oz-map-container">
+        <div class="oz-map-grid" id="oz-map-grid">
+          <div class="oz-center-label">Emerald<br>City</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ WORLD INTRO ═══ -->
+    <div id="oz-intro-overlay">
+      <div class="intro-icon" id="intro-icon"></div>
+      <h2 id="intro-title"></h2>
+      <div class="intro-stem-badge" id="intro-stem-badge"></div>
+      <div class="intro-story" id="intro-story"></div>
+      <div class="intro-science" id="intro-science"></div>
+      <button class="intro-enter-btn" id="intro-enter-btn">Enter World</button>
+    </div>
+
+    <!-- ═══ OBJECT DISCOVERY ═══ -->
+    <div id="oz-discovery-panel">
+      <div class="discovery-items" id="discovery-items"></div>
+    </div>
+
+    <div id="oz-object-popup">
+      <div class="popup-emoji" id="popup-emoji"></div>
+      <h3 id="popup-name"></h3>
+      <div class="popup-fact" id="popup-fact"></div>
+      <div class="popup-stem" id="popup-stem"></div>
+      <button class="popup-close" id="popup-close">Got it!</button>
+    </div>
+
+    <!-- ═══ OZ SCENE HUD ═══ -->
+    <div id="oz-scene-hud">
+      <div class="oz-hud-info">
+        <h3 id="oz-hud-title"></h3>
+        <div class="hud-stem" id="oz-hud-stem"></div>
+        <div class="hud-found" id="oz-hud-found"></div>
+      </div>
+      <div class="oz-hud-buttons">
+        <button class="oz-hud-btn" id="oz-hud-back">&larr; Back to Map</button>
+        <button class="oz-hud-btn quiz-btn" id="oz-hud-quiz">Take the Quiz</button>
+      </div>
+    </div>
+
+    <!-- ═══ QUIZ ═══ -->
+    <div id="oz-quiz-overlay">
+      <div class="quiz-container" id="quiz-container">
+        <div class="quiz-progress" id="quiz-progress"></div>
+        <div class="quiz-question" id="quiz-question"></div>
+        <div class="quiz-options" id="quiz-options"></div>
+        <div class="quiz-explanation" id="quiz-explanation"></div>
+        <button class="quiz-next-btn" id="quiz-next-btn">Next Question</button>
+      </div>
+      <div class="quiz-results" id="quiz-results">
+        <div class="results-stars" id="results-stars"></div>
+        <h2 id="results-title"></h2>
+        <div class="results-score" id="results-score"></div>
+        <div class="results-badge" id="results-badge"></div>
+        <button class="results-btn" id="results-back-btn">Back to Map</button>
+      </div>
+    </div>
+
+    <!-- ═══ GREEN FILTER ═══ -->
+    <div id="green-filter"></div>
+    <button class="green-spectacles-toggle" id="green-spectacles-btn">Put on Green Spectacles</button>
 
     <script type="module" src="/src/index.ts"></script>
   </body>

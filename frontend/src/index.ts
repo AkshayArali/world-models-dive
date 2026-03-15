@@ -3,6 +3,16 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { SplatMesh, SparkRenderer } from "@sparkjsdev/spark";
+import {
+  OZ_WORLDS,
+  getWorldById,
+  getProgress,
+  saveWorldProgress,
+  isWorldUnlocked,
+  getTotalStars,
+  type OzWorld,
+  type OzObject,
+} from "./oz-data";
 
 // ── Book catalog ──
 interface AnimDef { name: string; url: string; }
@@ -20,6 +30,7 @@ interface BookDef {
   modelPosition?: [number, number, number];
   modelRotation?: [number, number, number];
   extraAnims?: AnimDef[];
+  isOzBook?: boolean;
 }
 
 const BOOKS: BookDef[] = [
@@ -31,6 +42,16 @@ const BOOKS: BookDef[] = [
     splatUrl: "./splats/sensai.spz",
     sceneTitle: "Kabul, 1975",
     sceneSubtitle: "The kite-fighting tournament that changed everything",
+  },
+  {
+    id: "wizard_of_oz",
+    title: "The Wonderful Wizard of Oz",
+    author: "L. Frank Baum",
+    coverUrl: "./books/WizardOfOz.jpg",
+    splatUrl: "",
+    sceneTitle: "The Land of Oz",
+    sceneSubtitle: "A STEM learning adventure through 8 magical worlds",
+    isOzBook: true,
   },
   {
     id: "ww2",
@@ -69,6 +90,18 @@ const sceneTitleEl = document.getElementById("scene-title")!;
 const sceneSubtitleEl = document.getElementById("scene-subtitle")!;
 const backBtn = document.getElementById("back-btn")!;
 
+// Oz-specific DOM
+const ozMapOverlay = document.getElementById("oz-map-overlay")!;
+const ozMapGrid = document.getElementById("oz-map-grid")!;
+const ozMapBack = document.getElementById("oz-map-back")!;
+const ozIntroOverlay = document.getElementById("oz-intro-overlay")!;
+const ozDiscoveryPanel = document.getElementById("oz-discovery-panel")!;
+const ozObjectPopup = document.getElementById("oz-object-popup")!;
+const ozSceneHud = document.getElementById("oz-scene-hud")!;
+const ozQuizOverlay = document.getElementById("oz-quiz-overlay")!;
+const greenFilter = document.getElementById("green-filter")!;
+const greenSpectaclesBtn = document.getElementById("green-spectacles-btn")! as HTMLButtonElement;
+
 // ── Renderer ──
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -102,7 +135,7 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.3;
 controls.enablePan = false;
 
-// ── Library world (everything toggled off when viewing a splat scene) ──
+// ── Library world ──
 const libraryGroup = new THREE.Group();
 scene.add(libraryGroup);
 
@@ -200,8 +233,6 @@ libraryGroup.add(fill);
 const bookSpot = new THREE.PointLight(0xfff0dd, 5, 14, 1.5);
 bookSpot.position.set(0, 4, 2.5);
 libraryGroup.add(bookSpot);
-
-// ── Glow light that intensifies when book opens ──
 const portalLight = new THREE.PointLight(0xfff8e0, 0, 8, 1.5);
 libraryGroup.add(portalLight);
 
@@ -235,14 +266,12 @@ const COVER_T = 0.025;
 
 function createBook(def: BookDef, index: number, total: number): BookMesh {
   const root = new THREE.Group();
-
-  const leatherColor = def.locked ? 0x444455 : 0x3a2215;
+  const leatherColor = def.locked ? 0x444455 : (def.isOzBook ? 0x1a6b30 : 0x3a2215);
   const coverMat = new THREE.MeshStandardMaterial({ color: leatherColor, roughness: 0.65, metalness: 0.05 });
   const innerCoverMat = new THREE.MeshStandardMaterial({ color: 0x8b7355, roughness: 0.8 });
   const pageFaceMat = new THREE.MeshStandardMaterial({ color: 0xf5f0e5, roughness: 0.92 });
   const pageEdgeMat = new THREE.MeshStandardMaterial({ color: 0xe0d8c8, roughness: 0.85 });
 
-  // Back cover
   const back = new THREE.Mesh(
     new THREE.BoxGeometry(W, H, COVER_T),
     [coverMat, coverMat, coverMat, coverMat, innerCoverMat, coverMat],
@@ -250,12 +279,10 @@ function createBook(def: BookDef, index: number, total: number): BookMesh {
   back.position.z = -DEPTH / 2 + COVER_T / 2;
   root.add(back);
 
-  // Spine
   const spine = new THREE.Mesh(new THREE.BoxGeometry(COVER_T * 2, H, DEPTH + COVER_T), coverMat);
   spine.position.x = -W / 2 - COVER_T * 0.5;
   root.add(spine);
 
-  // Gold spine accents
   const goldMat = new THREE.MeshBasicMaterial({ color: 0xd4a44a });
   for (let s = 0; s < 3; s++) {
     const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.012, H * 0.55), goldMat);
@@ -264,7 +291,6 @@ function createBook(def: BookDef, index: number, total: number): BookMesh {
     root.add(strip);
   }
 
-  // Page block (visible edge of closed pages)
   const blockDepth = DEPTH - COVER_T * 2 - 0.006;
   const pageBlock = new THREE.Mesh(
     new THREE.BoxGeometry(W - 0.03, H - 0.04, blockDepth),
@@ -273,7 +299,6 @@ function createBook(def: BookDef, index: number, total: number): BookMesh {
   pageBlock.position.z = 0;
   root.add(pageBlock);
 
-  // Flippable pages — PlaneGeometry grid so vertices can curl
   const pagePivots: PagePivot[] = [];
   const pageW = W - 0.02;
   const pageH = H - 0.04;
@@ -283,24 +308,19 @@ function createBook(def: BookDef, index: number, total: number): BookMesh {
     const pivot = new THREE.Group();
     const zPos = DEPTH / 2 - COVER_T - 0.005 - (pageZone / PAGE_COUNT) * p;
     pivot.position.set(-W / 2 + 0.01, 0, zPos);
-
     const geo = new THREE.PlaneGeometry(pageW, pageH, PAGE_SEGS, 1);
     geo.translate(pageW / 2, 0, 0);
     const restPositions = new Float32Array(geo.attributes.position.array);
-
     const mat = pageFaceMat.clone();
     mat.side = THREE.DoubleSide;
     const sheet = new THREE.Mesh(geo, mat);
     pivot.add(sheet);
-
     root.add(pivot);
     pagePivots.push({ pivot, sheet, restPositions, delay: p * 0.03 });
   }
 
-  // Front cover on pivot
   const coverPivot = new THREE.Group();
   coverPivot.position.set(-W / 2, 0, DEPTH / 2 - COVER_T / 2);
-
   const frontCoverMat = new THREE.MeshStandardMaterial({ color: leatherColor, roughness: 0.6, metalness: 0.05 });
   if (def.coverUrl) {
     textureLoader.load(def.coverUrl, (tex) => {
@@ -310,7 +330,6 @@ function createBook(def: BookDef, index: number, total: number): BookMesh {
       frontCoverMat.needsUpdate = true;
     });
   }
-
   const frontCover = new THREE.Mesh(
     new THREE.BoxGeometry(W, H, COVER_T),
     [coverMat, coverMat, coverMat, coverMat, frontCoverMat, innerCoverMat],
@@ -319,10 +338,9 @@ function createBook(def: BookDef, index: number, total: number): BookMesh {
   coverPivot.add(frontCover);
   root.add(coverPivot);
 
-  // Position in arc
-  const spread = 3.0;
-  const angleStep = (Math.PI * 0.35) / Math.max(total - 1, 1);
-  const startAngle = -Math.PI * 0.175;
+  const spread = 3.6;
+  const angleStep = (Math.PI * 0.45) / Math.max(total - 1, 1);
+  const startAngle = -Math.PI * 0.225;
   const angle = startAngle + index * angleStep;
 
   root.position.set(Math.sin(angle) * spread, H / 2 + 0.12, -Math.cos(angle) * spread + 2);
@@ -334,8 +352,7 @@ function createBook(def: BookDef, index: number, total: number): BookMesh {
   const savedPosition = root.position.clone();
   const savedRotation = root.rotation.clone();
 
-  // Pedestal + glow
-  const glow = new THREE.PointLight(def.locked ? 0x667788 : 0xddccaa, 2.0, 4, 1.5);
+  const glow = new THREE.PointLight(def.locked ? 0x667788 : (def.isOzBook ? 0x44dd66 : 0xddccaa), 2.0, 4, 1.5);
   glow.position.set(Math.sin(angle) * spread, 0.5, -Math.cos(angle) * spread + 2);
   libraryGroup.add(glow);
   const ped = new THREE.Mesh(
@@ -386,6 +403,13 @@ let inScene = false;
 const gltfLoader = new GLTFLoader();
 const fbxLoader = new FBXLoader();
 
+// ── Oz state ──
+let ozActive = false;
+let currentOzWorld: OzWorld | null = null;
+let ozDiscoveryOrbs: THREE.Mesh[] = [];
+let ozFoundObjects: Set<string> = new Set();
+let greenFilterOn = false;
+
 // ── Character controls ──
 const keys: Record<string, boolean> = {};
 const BASE_SPEED = 1.2;
@@ -426,44 +450,31 @@ window.addEventListener("keyup", (e) => {
 
 function updateCharacterMovement(dt: number) {
   if (!activeModel || !inScene) return;
-
   const moveDir = new THREE.Vector3();
   if (keys["w"]) moveDir.z -= 1;
   if (keys["s"]) moveDir.z += 1;
   if (keys["a"]) moveDir.x -= 1;
   if (keys["d"]) moveDir.x += 1;
-
   const vertDir = (keys["e"] || keys["space"] ? 1 : 0) + (keys["q"] ? -1 : 0);
   const sprinting = keys["shift"];
   const speed = BASE_SPEED * (sprinting ? SPRINT_MULT : 1);
   const isMoving = moveDir.lengthSq() > 0 || vertDir !== 0;
-
   if (currentAction) {
     currentAction.paused = !isMoving;
-    if (isMoving && sprinting) currentAction.timeScale = 2.0;
-    else currentAction.timeScale = 1.0;
+    currentAction.timeScale = isMoving && sprinting ? 2.0 : 1.0;
   }
-
-  if (vertDir !== 0) {
-    activeModel.position.y += vertDir * speed * dt;
-  }
-
+  if (vertDir !== 0) activeModel.position.y += vertDir * speed * dt;
   if (moveDir.lengthSq() === 0) return;
   moveDir.normalize();
-
   const camForward = new THREE.Vector3();
   camera.getWorldDirection(camForward);
-  camForward.y = 0;
-  camForward.normalize();
+  camForward.y = 0; camForward.normalize();
   const camRight = new THREE.Vector3().crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
-
   const worldDir = new THREE.Vector3()
     .addScaledVector(camRight, moveDir.x)
     .addScaledVector(camForward, -moveDir.z)
     .normalize();
-
   activeModel.position.addScaledVector(worldDir, speed * dt);
-
   const targetAngle = Math.atan2(worldDir.x, worldDir.z);
   let angleDiff = targetAngle - activeModel.rotation.y;
   while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
@@ -473,19 +484,14 @@ function updateCharacterMovement(dt: number) {
 
 function updateThirdPersonCamera(dt: number) {
   if (!activeModel || !inScene) return;
-
   const modelPos = activeModel.position;
   const behind = new THREE.Vector3(0, 0, 1)
     .applyAxisAngle(new THREE.Vector3(0, 1, 0), activeModel.rotation.y);
-
   const desiredPos = new THREE.Vector3()
-    .copy(modelPos)
-    .add(new THREE.Vector3(0, CAM_OFFSET.y, 0))
+    .copy(modelPos).add(new THREE.Vector3(0, CAM_OFFSET.y, 0))
     .addScaledVector(behind, CAM_OFFSET.z);
-
   const camSmooth = 1 - Math.pow(0.01, dt);
   camera.position.lerp(desiredPos, camSmooth);
-
   const lookAt = new THREE.Vector3().copy(modelPos).add(CAM_LOOK_OFFSET);
   controls.target.lerp(lookAt, camSmooth);
 }
@@ -496,8 +502,15 @@ renderer.domElement.addEventListener("mousemove", (e) => {
   mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 });
+
 renderer.domElement.addEventListener("click", () => {
-  if (hoveredBook && !hoveredBook.def.locked && !isOpening) startOpenBook(hoveredBook);
+  if (hoveredBook && !hoveredBook.def.locked && !isOpening) {
+    startOpenBook(hoveredBook);
+    return;
+  }
+  if (inScene && ozActive && currentOzWorld) {
+    checkOrbClick();
+  }
 });
 
 function checkHover() {
@@ -524,17 +537,8 @@ function checkHover() {
 }
 
 // ══════════════════════════════════════════════════════
-//  BOOK OPEN ANIMATION — clean, cinematic
+//  BOOK OPEN ANIMATION
 // ══════════════════════════════════════════════════════
-//
-//  Timeline (2.5s total):
-//    0.00–0.12  Book rises, tilts toward camera
-//    0.08–0.20  Cover opens smoothly
-//    0.15–0.45  Pages flip halfway (stop mid-book)
-//    0.35–0.75  Camera dives straight into the open pages
-//    0.50–0.80  Golden glow intensifies from the pages
-//    0.70–1.00  Clean white fade
-//
 const ANIM_DURATION = 2.5;
 
 function startOpenBook(bm: BookMesh) {
@@ -555,83 +559,66 @@ function curlPage(pp: PagePivot, flipT: number) {
   const pos = pp.sheet.geometry.attributes.position;
   const arr = pos.array as Float32Array;
   const rest = pp.restPositions;
-
   if (flipT <= 0) {
     arr.set(rest);
     pos.needsUpdate = true;
     pp.sheet.geometry.computeVertexNormals();
     return;
   }
-
   const eased = easeOutCubic(flipT);
   const totalAngle = -Math.PI * 0.93 * eased;
   const curlStrength = Math.sin(flipT * Math.PI) * 0.4;
   const pw = W - 0.02;
-
   for (let v = 0, n = pos.count; v < n; v++) {
     const rx = rest[v * 3];
     const ry = rest[v * 3 + 1];
-
     const frac = Math.max(0, Math.min(rx / pw, 1));
     const angle = totalAngle * frac;
     const radius = rx;
-
     const lift = curlStrength * frac * Math.sin(frac * Math.PI) * 0.25;
-
     arr[v * 3]     = radius * Math.cos(angle);
     arr[v * 3 + 1] = ry + lift;
     arr[v * 3 + 2] = -radius * Math.sin(angle);
   }
-
   pos.needsUpdate = true;
   pp.sheet.geometry.computeVertexNormals();
 }
 
 function updateBookOpen(dt: number) {
   if (!isOpening || !openingBook) return;
-
   openProgress += dt / ANIM_DURATION;
   const t = Math.min(openProgress, 1);
   const bm = openingBook;
   const root = bm.group;
   const bp = root.position;
 
-  // ── Rise + tilt ──
   const riseT = easeOutCubic(smoothClamp(t, 0, 0.12));
   root.position.y = bm.savedPosition.y + riseT * 0.8;
   root.rotation.x = bm.savedRotation.x + riseT * (-Math.PI * 0.3);
 
-  // ── Cover opens fully ──
   const coverT = easeOutCubic(smoothClamp(t, 0.08, 0.20));
   bm.coverPivot.rotation.y = coverT * (-Math.PI);
 
-  // ── Pages flip with curl — only first half, stop mid-book ──
   const pageT = smoothClamp(t, 0.15, 0.45);
   const pagesToFlip = Math.floor(PAGE_COUNT * 0.55);
   for (let i = 0; i < bm.pagePivots.length; i++) {
     const pp = bm.pagePivots[i];
-    if (i >= pagesToFlip) {
-      curlPage(pp, 0);
-      continue;
-    }
+    if (i >= pagesToFlip) { curlPage(pp, 0); continue; }
     const normalized = i / pagesToFlip;
     const localT = Math.max(0, Math.min((pageT - normalized * 0.6) * 3.0, 1));
     curlPage(pp, localT);
   }
 
-  // ── Glow from inside the book ──
   const glowT = smoothClamp(t, 0.30, 0.75);
   portalLight.intensity = easeInOutCubic(glowT) * 30;
   portalLight.position.set(bp.x, bp.y + 0.4, bp.z + 0.15);
 
-  // ── Camera: smooth dive into the open pages ──
   const zoomT = easeInOutCubic(smoothClamp(t, 0.20, 0.75));
   const divePos = new THREE.Vector3(bp.x, bp.y + 0.5, bp.z + 0.6);
   const diveLook = new THREE.Vector3(bp.x, bp.y + 0.1, bp.z - 0.2);
   camera.position.lerpVectors(cameraStartPos, divePos, zoomT);
   controls.target.lerpVectors(cameraStartTarget, diveLook, zoomT);
 
-  // ── White fade ──
   const fadeT = smoothClamp(t, 0.70, 1.0);
   if (fadeT > 0) {
     loadingOverlay.style.display = "flex";
@@ -639,13 +626,454 @@ function updateBookOpen(dt: number) {
     loadingOverlay.style.opacity = String(easeInOutCubic(fadeT));
   }
 
-  // ── Done ──
   if (t >= 1.0) {
     isOpening = false;
     portalLight.intensity = 0;
-    enterScene(bm.def);
+    if (bm.def.isOzBook) {
+      enterOzMap();
+    } else {
+      enterScene(bm.def);
+    }
   }
 }
+
+// ══════════════════════════════════════════════════════
+//  OZ MAP
+// ══════════════════════════════════════════════════════
+
+function enterOzMap() {
+  ozActive = true;
+  libraryGroup.visible = false;
+  header.style.display = "none";
+  hint.style.display = "none";
+
+  loadingOverlay.style.display = "none";
+  loadingOverlay.style.opacity = "0";
+
+  buildOzMap();
+  ozMapOverlay.style.display = "flex";
+}
+
+function buildOzMap() {
+  ozMapGrid.innerHTML = '<div class="oz-center-label">Emerald<br>City</div>';
+
+  const quadrants = [
+    { name: "NORTH", color: "rgba(123,63,160,0.2)", label: "Gillikin Country", lColor: "#7B3FA0", pos: "top:0;left:15%;width:70%;height:35%", lPos: "top:5%;left:50%;transform:translateX(-50%)" },
+    { name: "EAST", color: "rgba(74,144,217,0.2)", label: "Munchkin Country", lColor: "#4A90D9", pos: "top:35%;right:0;width:40%;height:30%", lPos: "top:42%;right:5%" },
+    { name: "WEST", color: "rgba(241,196,15,0.2)", label: "Winkie Country", lColor: "#F1C40F", pos: "top:35%;left:0;width:40%;height:30%", lPos: "top:42%;left:5%" },
+    { name: "SOUTH", color: "rgba(231,76,60,0.2)", label: "Quadling Country", lColor: "#E74C3C", pos: "bottom:0;left:15%;width:70%;height:35%", lPos: "bottom:5%;left:50%;transform:translateX(-50%)" },
+  ];
+
+  quadrants.forEach(q => {
+    const div = document.createElement("div");
+    div.className = "oz-quadrant";
+    div.style.cssText = `${q.pos};background:${q.color};`;
+    ozMapGrid.appendChild(div);
+
+    const label = document.createElement("div");
+    label.className = "oz-quadrant-label";
+    label.style.cssText = `${q.lPos};color:${q.lColor};`;
+    label.textContent = q.label;
+    ozMapGrid.appendChild(label);
+  });
+
+  const progress = getProgress();
+
+  OZ_WORLDS.forEach((world) => {
+    const node = document.createElement("div");
+    node.className = "oz-world-node";
+    const unlocked = isWorldUnlocked(world.id);
+    if (!unlocked) node.classList.add("locked");
+
+    node.style.left = `${world.mapPosition[0]}%`;
+    node.style.top = `${world.mapPosition[1]}%`;
+
+    const wp = progress.find(p => p.worldId === world.id);
+    const stars = wp ? wp.stars : 0;
+
+    node.innerHTML = `
+      <div class="oz-node-circle" style="background:${world.biomeColor}">
+        ${world.badge.emoji}
+        ${stars > 0 ? `<span class="oz-node-stars">${"★".repeat(stars)}</span>` : ""}
+      </div>
+      <div class="oz-node-label">${world.name}</div>
+      <div class="oz-node-topic">${world.stemTitle}</div>
+    `;
+
+    if (unlocked) {
+      node.addEventListener("click", () => showWorldIntro(world));
+    }
+
+    ozMapGrid.appendChild(node);
+  });
+
+  // Stats
+  const totalStars = getTotalStars();
+  const worldsDone = progress.filter(p => p.completed).length;
+  document.getElementById("oz-total-stars")!.innerHTML = `⭐ ${totalStars} stars`;
+  document.getElementById("oz-worlds-done")!.innerHTML = `🗺️ ${worldsDone}/${OZ_WORLDS.length} worlds`;
+
+  // Badges
+  const badgeShelf = document.getElementById("oz-badge-shelf")!;
+  badgeShelf.innerHTML = "";
+  OZ_WORLDS.forEach((w) => {
+    const earned = progress.some(p => p.worldId === w.id && p.completed);
+    const badge = document.createElement("div");
+    badge.className = `oz-badge${earned ? " earned" : ""}`;
+    badge.textContent = earned ? w.badge.emoji : "?";
+    badge.title = earned ? w.badge.name : "Locked";
+    badgeShelf.appendChild(badge);
+  });
+}
+
+// ══════════════════════════════════════════════════════
+//  WORLD INTRO
+// ══════════════════════════════════════════════════════
+
+function showWorldIntro(world: OzWorld) {
+  currentOzWorld = world;
+  ozIntroOverlay.style.display = "flex";
+
+  document.getElementById("intro-icon")!.textContent = world.badge.emoji;
+  document.getElementById("intro-title")!.textContent = world.name;
+
+  const stemBadge = document.getElementById("intro-stem-badge")!;
+  stemBadge.textContent = world.stemTopic;
+  stemBadge.style.background = `${world.biomeColor}33`;
+  stemBadge.style.color = world.biomeColor;
+  stemBadge.style.border = `1px solid ${world.biomeColor}66`;
+
+  document.getElementById("intro-story")!.textContent = world.storySummary;
+  document.getElementById("intro-science")!.textContent = world.scienceIntro;
+
+  const enterBtn = document.getElementById("intro-enter-btn")! as HTMLButtonElement;
+  enterBtn.style.background = `linear-gradient(135deg, ${world.biomeColor}, ${world.biomeColor}cc)`;
+  enterBtn.onclick = () => {
+    ozIntroOverlay.style.display = "none";
+    ozMapOverlay.style.display = "none";
+    enterOzWorld(world);
+  };
+}
+
+// ══════════════════════════════════════════════════════
+//  OZ WORLD (3D Scene)
+// ══════════════════════════════════════════════════════
+
+function enterOzWorld(world: OzWorld) {
+  currentOzWorld = world;
+  ozFoundObjects = new Set();
+
+  loadingOverlay.style.display = "flex";
+  loadingOverlay.style.opacity = "1";
+
+  scene.fog = null;
+  scene.background = new THREE.Color(0x000000);
+
+  const splatUrl = world.splatUrl || "./splats/sensai.spz";
+  const splat = new SplatMesh({
+    url: splatUrl,
+    onLoad: () => {
+      activeSplat = splat;
+      inScene = true;
+
+      controls.enabled = true;
+      controls.autoRotate = true;
+      controls.autoRotateSpeed = 0.4;
+      controls.minDistance = 0.5;
+      controls.maxDistance = 50;
+      controls.minPolarAngle = 0;
+      controls.maxPolarAngle = Math.PI;
+      controls.enablePan = true;
+      camera.position.set(0, 1.5, 4);
+      controls.target.set(0, 0, 0);
+
+      const amb = new THREE.AmbientLight(0xffffff, 1.5);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+      dirLight.position.set(5, 10, 5);
+      scene.add(amb);
+      scene.add(dirLight);
+      activeSceneLights.push(amb, dirLight);
+
+      spawnDiscoveryOrbs(world);
+      showOzSceneHud(world);
+
+      if (world.id === "emerald_city") {
+        greenSpectaclesBtn.style.display = "block";
+      }
+
+      loadingOverlay.style.transition = "opacity 0.8s ease";
+      loadingOverlay.style.opacity = "0";
+      setTimeout(() => {
+        loadingOverlay.style.display = "none";
+        loadingOverlay.style.transition = "none";
+      }, 900);
+    },
+  });
+  scene.add(splat);
+}
+
+function spawnDiscoveryOrbs(world: OzWorld) {
+  ozDiscoveryOrbs.forEach(orb => scene.remove(orb));
+  ozDiscoveryOrbs = [];
+
+  const discoveryItems = document.getElementById("discovery-items")!;
+  discoveryItems.innerHTML = "";
+  ozDiscoveryPanel.style.display = "block";
+
+  world.objects.forEach((obj) => {
+    const geo = new THREE.SphereGeometry(0.15, 16, 16);
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(world.biomeColor),
+      transparent: true,
+      opacity: 0.7,
+    });
+    const orb = new THREE.Mesh(geo, mat);
+    orb.position.set(...obj.position);
+    orb.userData.ozObject = obj;
+    scene.add(orb);
+    ozDiscoveryOrbs.push(orb);
+
+    const outerGeo = new THREE.SphereGeometry(0.25, 16, 16);
+    const outerMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(world.biomeColor),
+      transparent: true,
+      opacity: 0.15,
+      side: THREE.BackSide,
+    });
+    const outer = new THREE.Mesh(outerGeo, outerMat);
+    orb.add(outer);
+
+    const item = document.createElement("div");
+    item.className = "discovery-item";
+    item.id = `disc-${obj.id}`;
+    item.textContent = obj.emoji;
+    item.title = "???";
+    discoveryItems.appendChild(item);
+  });
+}
+
+function checkOrbClick() {
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(ozDiscoveryOrbs, false);
+  if (intersects.length > 0) {
+    const orb = intersects[0].object as THREE.Mesh;
+    const obj = orb.userData.ozObject as OzObject;
+    if (obj && !ozFoundObjects.has(obj.id)) {
+      ozFoundObjects.add(obj.id);
+      showObjectPopup(obj);
+      markOrbFound(orb, obj);
+      updateHudFound();
+    }
+  }
+}
+
+function markOrbFound(orb: THREE.Mesh, obj: OzObject) {
+  (orb.material as THREE.MeshBasicMaterial).opacity = 0.2;
+  const discItem = document.getElementById(`disc-${obj.id}`);
+  if (discItem) {
+    discItem.classList.add("found");
+    discItem.title = obj.name;
+  }
+}
+
+function showObjectPopup(obj: OzObject) {
+  document.getElementById("popup-emoji")!.textContent = obj.emoji;
+  document.getElementById("popup-name")!.textContent = obj.name;
+  document.getElementById("popup-fact")!.textContent = obj.fact;
+  document.getElementById("popup-stem")!.textContent = `🔬 ${obj.stemConnection}`;
+  ozObjectPopup.style.display = "block";
+}
+
+document.getElementById("popup-close")!.addEventListener("click", () => {
+  ozObjectPopup.style.display = "none";
+});
+
+function showOzSceneHud(world: OzWorld) {
+  ozSceneHud.style.display = "flex";
+  document.getElementById("oz-hud-title")!.textContent = world.name;
+  document.getElementById("oz-hud-stem")!.textContent = world.stemTopic;
+  updateHudFound();
+}
+
+function updateHudFound() {
+  if (!currentOzWorld) return;
+  const total = currentOzWorld.objects.length;
+  const found = ozFoundObjects.size;
+  document.getElementById("oz-hud-found")!.textContent =
+    found === total
+      ? `All ${total} objects discovered!`
+      : `${found}/${total} objects found — click glowing orbs!`;
+}
+
+document.getElementById("oz-hud-back")!.addEventListener("click", () => {
+  exitOzWorld();
+});
+
+document.getElementById("oz-hud-quiz")!.addEventListener("click", () => {
+  if (currentOzWorld) startQuiz(currentOzWorld);
+});
+
+function exitOzWorld() {
+  if (activeSplat) { scene.remove(activeSplat); activeSplat.dispose(); activeSplat = null; }
+  ozDiscoveryOrbs.forEach(orb => scene.remove(orb));
+  ozDiscoveryOrbs = [];
+  activeSceneLights.forEach(l => scene.remove(l));
+  activeSceneLights.length = 0;
+  inScene = false;
+
+  ozSceneHud.style.display = "none";
+  ozDiscoveryPanel.style.display = "none";
+  ozObjectPopup.style.display = "none";
+  greenSpectaclesBtn.style.display = "none";
+  greenFilter.style.display = "none";
+  greenFilterOn = false;
+
+  scene.fog = null;
+  scene.background = new THREE.Color(0x000000);
+
+  buildOzMap();
+  ozMapOverlay.style.display = "flex";
+}
+
+// ══════════════════════════════════════════════════════
+//  GREEN SPECTACLES (Emerald City)
+// ══════════════════════════════════════════════════════
+
+greenSpectaclesBtn.addEventListener("click", () => {
+  greenFilterOn = !greenFilterOn;
+  greenFilter.style.display = greenFilterOn ? "block" : "none";
+  greenSpectaclesBtn.textContent = greenFilterOn
+    ? "Remove Green Spectacles"
+    : "Put on Green Spectacles";
+});
+
+// ══════════════════════════════════════════════════════
+//  QUIZ SYSTEM
+// ══════════════════════════════════════════════════════
+
+let quizWorldId = "";
+let quizQuestions: OzWorld["quiz"] = [];
+let quizIndex = 0;
+let quizScore = 0;
+let quizAnswered = false;
+
+function startQuiz(world: OzWorld) {
+  quizWorldId = world.id;
+  quizQuestions = [...world.quiz];
+  quizIndex = 0;
+  quizScore = 0;
+  quizAnswered = false;
+
+  ozQuizOverlay.style.display = "flex";
+  document.getElementById("quiz-results")!.style.display = "none";
+  document.getElementById("quiz-container")!.style.display = "block";
+
+  renderQuizQuestion();
+}
+
+function renderQuizQuestion() {
+  const q = quizQuestions[quizIndex];
+  quizAnswered = false;
+
+  const progressEl = document.getElementById("quiz-progress")!;
+  progressEl.innerHTML = quizQuestions.map((_, i) => {
+    let cls = "quiz-dot";
+    if (i === quizIndex) cls += " active";
+    return `<div class="${cls}" id="qdot-${i}"></div>`;
+  }).join("");
+
+  document.getElementById("quiz-question")!.textContent = q.question;
+
+  const optionsEl = document.getElementById("quiz-options")!;
+  optionsEl.innerHTML = q.options.map((opt, i) =>
+    `<button class="quiz-option" data-idx="${i}">${opt}</button>`
+  ).join("");
+
+  document.getElementById("quiz-explanation")!.style.display = "none";
+  document.getElementById("quiz-next-btn")!.style.display = "none";
+
+  optionsEl.querySelectorAll(".quiz-option").forEach(btn => {
+    btn.addEventListener("click", () => handleQuizAnswer(parseInt((btn as HTMLElement).dataset.idx!)));
+  });
+}
+
+function handleQuizAnswer(idx: number) {
+  if (quizAnswered) return;
+  quizAnswered = true;
+
+  const q = quizQuestions[quizIndex];
+  const correct = idx === q.correctIndex;
+  if (correct) quizScore++;
+
+  const options = document.querySelectorAll(".quiz-option");
+  options.forEach((opt, i) => {
+    if (i === q.correctIndex) opt.classList.add("correct-answer");
+    if (i === idx && !correct) opt.classList.add("wrong-answer");
+    (opt as HTMLButtonElement).style.pointerEvents = "none";
+  });
+
+  const dot = document.getElementById(`qdot-${quizIndex}`);
+  if (dot) {
+    dot.classList.remove("active");
+    dot.classList.add(correct ? "correct" : "wrong");
+  }
+
+  const explEl = document.getElementById("quiz-explanation")!;
+  explEl.textContent = q.explanation;
+  explEl.style.display = "block";
+  explEl.style.borderLeftColor = correct ? "#2ecc71" : "#e74c3c";
+
+  const nextBtn = document.getElementById("quiz-next-btn")! as HTMLButtonElement;
+  nextBtn.style.display = "block";
+  nextBtn.textContent = quizIndex < quizQuestions.length - 1 ? "Next Question" : "See Results";
+}
+
+document.getElementById("quiz-next-btn")!.addEventListener("click", () => {
+  quizIndex++;
+  if (quizIndex < quizQuestions.length) {
+    renderQuizQuestion();
+  } else {
+    showQuizResults();
+  }
+});
+
+function showQuizResults() {
+  document.getElementById("quiz-container")!.style.display = "none";
+  const resultsEl = document.getElementById("quiz-results")!;
+  resultsEl.style.display = "block";
+
+  const total = quizQuestions.length;
+  const pct = quizScore / total;
+  let stars = 0;
+  if (pct >= 0.25) stars = 1;
+  if (pct >= 0.5) stars = 2;
+  if (pct >= 0.75) stars = 3;
+  if (pct === 1) stars = 4;
+
+  document.getElementById("results-stars")!.textContent = "⭐".repeat(stars) + "☆".repeat(4 - stars);
+
+  const titles = ["Keep Exploring!", "Good Start!", "Great Work!", "Amazing!", "Perfect Score!"];
+  document.getElementById("results-title")!.textContent = titles[stars];
+  document.getElementById("results-score")!.textContent = `${quizScore} out of ${total} correct`;
+
+  const world = getWorldById(quizWorldId);
+  if (world && stars > 0) {
+    saveWorldProgress(quizWorldId, stars);
+    document.getElementById("results-badge")!.textContent =
+      `${world.badge.emoji} Badge earned: ${world.badge.name}!`;
+  } else {
+    document.getElementById("results-badge")!.textContent = "Try again to earn the badge!";
+  }
+}
+
+document.getElementById("results-back-btn")!.addEventListener("click", () => {
+  ozQuizOverlay.style.display = "none";
+  exitOzWorld();
+});
+
+// ══════════════════════════════════════════════════════
+//  STANDARD SCENE (non-Oz books)
+// ══════════════════════════════════════════════════════
 
 function enterScene(def: BookDef) {
   header.style.display = "none";
@@ -699,22 +1127,17 @@ function enterScene(def: BookDef) {
         const maxDim = Math.max(...box.getSize(new THREE.Vector3()).toArray());
         const s = (def.modelScale ?? 1.7) / maxDim;
         model.scale.multiplyScalar(s);
-
         box.setFromObject(model);
         const c = box.getCenter(new THREE.Vector3());
         model.position.set(-c.x, -box.min.y, -c.z);
-
         scene.add(model);
         activeModel = model;
         modelSpawnPos.copy(model.position);
         modelSpawnRot = model.rotation.y;
-
         activeAnimMixer = new THREE.AnimationMixer(model);
         activeAnimActions.clear();
         currentAction = null;
         controls.autoRotate = false;
-
-        // Load extra animation FBX files (e.g. run)
         if (def.extraAnims && def.extraAnims.length > 0) {
           def.extraAnims.forEach((ad) => {
             fbxLoader.load(ad.url, (animFbx) => {
@@ -729,13 +1152,9 @@ function enterScene(def: BookDef) {
           });
         }
       };
-
       const isFbx = def.modelUrl.toLowerCase().endsWith(".fbx");
-      if (isFbx) {
-        fbxLoader.load(def.modelUrl, setupModel);
-      } else {
-        gltfLoader.load(def.modelUrl, (gltf) => setupModel(gltf.scene));
-      }
+      if (isFbx) fbxLoader.load(def.modelUrl, setupModel);
+      else gltfLoader.load(def.modelUrl, (gltf) => setupModel(gltf.scene));
     }
   } else {
     inScene = true;
@@ -751,29 +1170,31 @@ function enterScene(def: BookDef) {
 }
 
 function resetToLibrary() {
-  if (activeSplat) {
-    scene.remove(activeSplat);
-    activeSplat.dispose();
-    activeSplat = null;
-  }
-  if (activeModel) {
-    scene.remove(activeModel);
-    activeModel = null;
-  }
-  if (activeAnimMixer) {
-    activeAnimMixer.stopAllAction();
-    activeAnimMixer = null;
-  }
+  if (activeSplat) { scene.remove(activeSplat); activeSplat.dispose(); activeSplat = null; }
+  if (activeModel) { scene.remove(activeModel); activeModel = null; }
+  if (activeAnimMixer) { activeAnimMixer.stopAllAction(); activeAnimMixer = null; }
   activeAnimActions.clear();
   currentAction = null;
-  activeSceneLights.forEach((l) => scene.remove(l));
+  activeSceneLights.forEach(l => scene.remove(l));
   activeSceneLights.length = 0;
+  ozDiscoveryOrbs.forEach(orb => scene.remove(orb));
+  ozDiscoveryOrbs = [];
   inScene = false;
+  ozActive = false;
+  currentOzWorld = null;
 
   loadingOverlay.style.display = "none";
   loadingOverlay.style.opacity = "0";
   loadingOverlay.style.transition = "none";
   sceneInfo.style.display = "none";
+  ozMapOverlay.style.display = "none";
+  ozSceneHud.style.display = "none";
+  ozDiscoveryPanel.style.display = "none";
+  ozObjectPopup.style.display = "none";
+  ozQuizOverlay.style.display = "none";
+  greenSpectaclesBtn.style.display = "none";
+  greenFilter.style.display = "none";
+  greenFilterOn = false;
   header.style.display = "block";
   header.style.opacity = "1";
   hint.style.display = "block";
@@ -804,11 +1225,11 @@ function resetToLibrary() {
 }
 
 backBtn.addEventListener("click", resetToLibrary);
+ozMapBack.addEventListener("click", resetToLibrary);
 
 // ── Easing helpers ──
 function easeOutCubic(t: number) { return 1 - Math.pow(1 - t, 3); }
 function easeInOutCubic(t: number) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
-
 function smoothClamp(t: number, start: number, end: number) {
   return Math.max(0, Math.min((t - start) / (end - start), 1));
 }
@@ -821,7 +1242,6 @@ function animate() {
   const dt = clock.getDelta();
   const t = clock.getElapsedTime();
 
-  // Float books
   bookMeshes.forEach((b, i) => {
     if (b === openingBook) return;
     const baseY = b.group.userData.hoverY as number;
@@ -832,7 +1252,6 @@ function animate() {
     b.group.scale.lerp(new THREE.Vector3(s, s, s), 0.07);
   });
 
-  // Fireflies
   const fp = ffGeo.getAttribute("position") as THREE.BufferAttribute;
   for (let i = 0; i < ffCount; i++) {
     const d = ffData[i];
@@ -844,11 +1263,19 @@ function animate() {
   fp.needsUpdate = true;
   ffMat.opacity = 0.5 + Math.sin(t * 1.8) * 0.2;
 
+  // Animate discovery orbs
+  ozDiscoveryOrbs.forEach((orb, i) => {
+    orb.position.y += Math.sin(t * 2 + i * 1.5) * 0.001;
+    const mat = orb.material as THREE.MeshBasicMaterial;
+    mat.opacity = 0.5 + Math.sin(t * 3 + i * 2) * 0.3;
+    orb.scale.setScalar(1 + Math.sin(t * 2.5 + i) * 0.1);
+  });
+
   if (activeAnimMixer) activeAnimMixer.update(dt);
   updateCharacterMovement(dt);
   if (activeModel && inScene) updateThirdPersonCamera(dt);
   updateBookOpen(dt);
-  if (!inScene) checkHover();
+  if (!inScene && !ozActive) checkHover();
   controls.update();
   spark.render(scene, camera);
 }
