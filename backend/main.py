@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
 
-GEMINI_API_KEY = "AIzaSyCQ2JLwsuJZhIy5w31iFbxpfoZ9QxXvM4c"
+GEMINI_API_KEY = "AIzaSyCQ2JLwsuJZhIy5w31iFbxpfoZ9QxXvM4c" # expired, and deleted
 genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI()
